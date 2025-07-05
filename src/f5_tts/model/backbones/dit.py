@@ -13,6 +13,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from x_transformers.x_transformers import RotaryEmbedding
+from typing import Optional
 
 from f5_tts.model.modules import (
     AdaLayerNorm_Final,
@@ -23,6 +24,7 @@ from f5_tts.model.modules import (
     get_pos_embed_indices,
     precompute_freqs_cis,
 )
+from f5_tts.model.adapters import AdapterConfig, TextEmbeddingAdapter
 
 
 # Text embedding
@@ -120,6 +122,7 @@ class DiT(nn.Module):
         attn_mask_enabled=False,
         long_skip_connection=False,
         checkpoint_activations=False,
+        adapter_config: Optional[AdapterConfig] = None,
     ):
         super().__init__()
 
@@ -136,6 +139,20 @@ class DiT(nn.Module):
 
         self.dim = dim
         self.depth = depth
+        self.adapter_config = adapter_config
+
+        # Add text embedding adapter if enabled
+        if adapter_config is not None and adapter_config.enable_text_adapter:
+            # For Romanian, we might need extended vocabulary
+            extended_vocab_sizes = {
+                "en": text_num_embeds,
+                "ro": text_num_embeds + 100  # Add 100 Romanian-specific tokens
+            }
+            self.text_embedding_adapter = TextEmbeddingAdapter(
+                text_num_embeds, extended_vocab_sizes, text_dim, adapter_config.default_language
+            )
+        else:
+            self.text_embedding_adapter = None
 
         self.transformer_blocks = nn.ModuleList(
             [
@@ -149,6 +166,7 @@ class DiT(nn.Module):
                     pe_attn_head=pe_attn_head,
                     attn_backend=attn_backend,
                     attn_mask_enabled=attn_mask_enabled,
+                    adapter_config=adapter_config,
                 )
                 for _ in range(depth)
             ]
@@ -190,6 +208,7 @@ class DiT(nn.Module):
         drop_audio_cond: bool = False,
         drop_text: bool = False,
         cache: bool = True,
+        language: Optional[str] = None,
     ):
         seq_len = x.shape[1]
         if cache:
@@ -203,6 +222,10 @@ class DiT(nn.Module):
                 text_embed = self.text_cond
         else:
             text_embed = self.text_embed(text, seq_len, drop_text=drop_text)
+
+        # Apply text embedding adapter if enabled
+        if self.text_embedding_adapter is not None and language is not None:
+            text_embed = self.text_embedding_adapter(text_embed, text, language)
 
         x = self.input_embed(x, cond, text_embed, drop_audio_cond=drop_audio_cond)
 
@@ -222,6 +245,8 @@ class DiT(nn.Module):
         drop_text: bool = False,  # cfg for text
         cfg_infer: bool = False,  # cfg inference, pack cond & uncond forward
         cache: bool = False,
+        language: Optional[str] = None,  # language for adapter routing
+        language_ids: Optional[torch.Tensor] = None,  # batch language IDs
     ):
         batch, seq_len = x.shape[0], x.shape[1]
         if time.ndim == 0:
@@ -230,13 +255,16 @@ class DiT(nn.Module):
         # t: conditioning time, text: text, x: noised audio + cond audio + text
         t = self.time_embed(time)
         if cfg_infer:  # pack cond & uncond forward: b n d -> 2b n d
-            x_cond = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False, cache=cache)
-            x_uncond = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True, cache=cache)
+            x_cond = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False, cache=cache, language=language)
+            x_uncond = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True, cache=cache, language=language)
             x = torch.cat((x_cond, x_uncond), dim=0)
             t = torch.cat((t, t), dim=0)
             mask = torch.cat((mask, mask), dim=0) if mask is not None else None
+            # Duplicate language information for cfg
+            if language_ids is not None:
+                language_ids = torch.cat((language_ids, language_ids), dim=0)
         else:
-            x = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond, drop_text=drop_text, cache=cache)
+            x = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond, drop_text=drop_text, cache=cache, language=language)
 
         rope = self.rotary_embed.forward_from_seq_len(seq_len)
 
@@ -248,7 +276,7 @@ class DiT(nn.Module):
                 # https://pytorch.org/docs/stable/checkpoint.html#torch.utils.checkpoint.checkpoint
                 x = torch.utils.checkpoint.checkpoint(self.ckpt_wrapper(block), x, t, mask, rope, use_reentrant=False)
             else:
-                x = block(x, t, mask=mask, rope=rope)
+                x = block(x, t, mask=mask, rope=rope, language=language, language_ids=language_ids)
 
         if self.long_skip_connection is not None:
             x = self.long_skip_connection(torch.cat((x, residual), dim=-1))

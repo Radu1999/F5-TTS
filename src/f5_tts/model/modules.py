@@ -21,6 +21,7 @@ from torch import nn
 from x_transformers.x_transformers import apply_rotary_pos_emb
 
 from f5_tts.model.utils import is_package_available
+from f5_tts.model.adapters import MultiLanguageAdapter, AttentionAdapter, AdapterConfig
 
 
 # raw wav to mel spec
@@ -642,9 +643,7 @@ class JointAttnProcessor:
         return x, c
 
 
-# DiT Block
-
-
+# DiT Block - Modified to support adapters
 class DiTBlock(nn.Module):
     def __init__(
         self,
@@ -657,6 +656,7 @@ class DiTBlock(nn.Module):
         pe_attn_head=None,
         attn_backend="torch",  # "torch" or "flash_attn"
         attn_mask_enabled=True,
+        adapter_config: Optional[AdapterConfig] = None,
     ):
         super().__init__()
 
@@ -677,18 +677,45 @@ class DiTBlock(nn.Module):
         self.ff_norm = nn.LayerNorm(dim, elementwise_affine=False, eps=1e-6)
         self.ff = FeedForward(dim=dim, mult=ff_mult, dropout=dropout, approximate="tanh")
 
-    def forward(self, x, t, mask=None, rope=None):  # x: noised input, t: time embedding
+        # Add adapter support
+        self.adapter_config = adapter_config
+        if adapter_config is not None:
+            if adapter_config.enable_attention_adapter:
+                self.attention_adapter = AttentionAdapter(dim, heads, adapter_config.languages)
+            else:
+                self.attention_adapter = None
+            
+            if adapter_config.enable_feedforward_adapter:
+                self.ff_adapter = MultiLanguageAdapter(dim, adapter_config.languages, adapter_config.default_language)
+            else:
+                self.ff_adapter = None
+        else:
+            self.attention_adapter = None
+            self.ff_adapter = None
+
+    def forward(self, x, t, mask=None, rope=None, language=None, language_ids=None):  # x: noised input, t: time embedding
         # pre-norm & modulation for attention input
         norm, gate_msa, shift_mlp, scale_mlp, gate_mlp = self.attn_norm(x, emb=t)
 
         # attention
         attn_output = self.attn(x=norm, mask=mask, rope=rope)
 
+        # Apply attention adapter if enabled
+        if self.attention_adapter is not None:
+            # For simplicity, we'll apply the adapter to the attention output
+            # In a more sophisticated implementation, we'd apply it to Q, K, V separately
+            attn_output += self.attention_adapter.out_adapters(attn_output, language, language_ids)
+
         # process attention output for input x
         x = x + gate_msa.unsqueeze(1) * attn_output
 
         norm = self.ff_norm(x) * (1 + scale_mlp[:, None]) + shift_mlp[:, None]
         ff_output = self.ff(norm)
+        
+        # Apply feed-forward adapter if enabled
+        if self.ff_adapter is not None:
+            ff_output +=  self.ff_adapter(ff_output, language, language_ids)
+
         x = x + gate_mlp.unsqueeze(1) * ff_output
 
         return x

@@ -10,7 +10,7 @@ d - dimension
 from __future__ import annotations
 
 from random import random
-from typing import Callable
+from typing import Callable, Optional
 
 import torch
 import torch.nn.functional as F
@@ -28,6 +28,7 @@ from f5_tts.model.utils import (
     list_str_to_tensor,
     mask_from_frac_lengths,
 )
+from f5_tts.model.adapters import AdapterConfig
 
 
 class CFM(nn.Module):
@@ -47,6 +48,7 @@ class CFM(nn.Module):
         mel_spec_kwargs: dict = dict(),
         frac_lengths_mask: tuple[float, float] = (0.7, 1.0),
         vocab_char_map: dict[str:int] | None = None,
+        adapter_config: Optional[AdapterConfig] = None,
     ):
         super().__init__()
 
@@ -74,6 +76,9 @@ class CFM(nn.Module):
 
         # vocab map for tokenization
         self.vocab_char_map = vocab_char_map
+        
+        # adapter configuration
+        self.adapter_config = adapter_config
 
     @property
     def device(self):
@@ -98,6 +103,8 @@ class CFM(nn.Module):
         duplicate_test=False,
         t_inter=0.1,
         edit_mask=None,
+        language: Optional[str] = None,  # language for adapter routing
+        language_ids: Optional[torch.Tensor] = None,  # batch language IDs
     ):
         self.eval()
         # raw wave
@@ -173,6 +180,8 @@ class CFM(nn.Module):
                     drop_audio_cond=False,
                     drop_text=False,
                     cache=True,
+                    language=language,
+                    language_ids=language_ids,
                 )
                 return pred
 
@@ -185,6 +194,8 @@ class CFM(nn.Module):
                 mask=mask,
                 cfg_infer=True,
                 cache=True,
+                language=language,
+                language_ids=language_ids,
             )
             pred, null_pred = torch.chunk(pred_cfg, 2, dim=0)
             return pred + (pred - null_pred) * cfg_strength
@@ -234,6 +245,8 @@ class CFM(nn.Module):
         *,
         lens: int["b"] | None = None,  # noqa: F821
         noise_scheduler: str | None = None,
+        language: Optional[str] = None,  # language for adapter routing
+        language_ids: Optional[torch.Tensor] = None,  # batch language IDs
     ):
         # handle raw wave
         if inp.ndim == 2:
@@ -292,7 +305,8 @@ class CFM(nn.Module):
 
         # apply mask will use more memory; might adjust batchsize or batchsampler long sequence threshold
         pred = self.transformer(
-            x=φ, cond=cond, text=text, time=time, drop_audio_cond=drop_audio_cond, drop_text=drop_text, mask=mask
+            x=φ, cond=cond, text=text, time=time, drop_audio_cond=drop_audio_cond, drop_text=drop_text, mask=mask,
+            language=language, language_ids=language_ids
         )
 
         # flow matching loss
