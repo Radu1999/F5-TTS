@@ -173,18 +173,30 @@ def setup_adapter_model(
 def main():
     parser = argparse.ArgumentParser(description="Train language adapters for F5-TTS")
     
+    # Experiment configuration
+    parser.add_argument("--exp_name", type=str, default="F5TTS_Adapters",
+                        help="Name of the experiment")
+    
     # Model and data configuration
-    parser.add_argument("--base_model_path", type=str, required=True,
-                        help="Path to the base pre-trained model")
-    parser.add_argument("--romanian_dataset", type=str, required=True,
+    parser.add_argument("--base_model_path", type=str, default=None,
+                        help="Path to the base pre-trained model (deprecated, use --pretrain)")
+    parser.add_argument("--pretrain", type=str, default=None,
+                        help="Path to the pre-trained model")
+    parser.add_argument("--romanian_dataset", type=str, default=None,
                         help="Path to Romanian dataset")
     parser.add_argument("--english_dataset", type=str, default=None,
                         help="Path to English dataset (optional, for joint training)")
-    parser.add_argument("--output_dir", type=str, required=True,
+    parser.add_argument("--dataset_name", type=str, default="ro_tts",
+                        help="Name of the dataset")
+    parser.add_argument("--output_dir", type=str, default="./checkpoints",
                         help="Directory to save adapter checkpoints")
+    parser.add_argument("--finetune", action="store_true",
+                        help="Enable finetuning mode")
+    parser.add_argument("--tokenizer", type=str, default="char", choices=["char", "pinyin"],
+                        help="Tokenizer type to use")
     
     # Adapter configuration
-    parser.add_argument("--adapter_type", type=str, default="lora", choices=["lora", "bottleneck"],
+    parser.add_argument("--adapter_type", type=str, default="bottleneck", choices=["lora", "bottleneck"],
                         help="Type of adapter to use")
     parser.add_argument("--adapter_rank", type=int, default=16,
                         help="Rank for LoRA adapters")
@@ -197,13 +209,31 @@ def main():
     parser.add_argument("--learning_rate", type=float, default=1e-4,
                         help="Learning rate for adapter training")
     parser.add_argument("--batch_size", type=int, default=16,
+                        help="Batch size per GPU (deprecated, use --batch_size_per_gpu)")
+    parser.add_argument("--batch_size_per_gpu", type=int, default=16,
                         help="Batch size per GPU")
+    parser.add_argument("--batch_size_type", type=str, default="sample", choices=["sample", "frame"],
+                        help="Batch size type")
+    parser.add_argument("--max_samples", type=int, default=64,
+                        help="Maximum number of samples per batch")
+    parser.add_argument("--grad_accumulation_steps", type=int, default=1,
+                        help="Gradient accumulation steps")
+    parser.add_argument("--max_grad_norm", type=float, default=1.0,
+                        help="Maximum gradient norm for clipping")
     parser.add_argument("--epochs", type=int, default=20,
                         help="Number of training epochs")
     parser.add_argument("--warmup_steps", type=int, default=1000,
-                        help="Number of warmup steps")
+                        help="Number of warmup steps (deprecated, use --num_warmup_updates)")
+    parser.add_argument("--num_warmup_updates", type=int, default=1000,
+                        help="Number of warmup updates")
     parser.add_argument("--save_steps", type=int, default=1000,
-                        help="Save checkpoint every N steps")
+                        help="Save checkpoint every N steps (deprecated, use --save_per_updates)")
+    parser.add_argument("--save_per_updates", type=int, default=1000,
+                        help="Save checkpoint every N updates")
+    parser.add_argument("--keep_last_n_checkpoints", type=int, default=3,
+                        help="Keep last N checkpoints (-1 for all)")
+    parser.add_argument("--last_per_updates", type=int, default=1000,
+                        help="Save last checkpoint every N updates")
     parser.add_argument("--eval_steps", type=int, default=500,
                         help="Evaluate every N steps")
     
@@ -212,6 +242,12 @@ def main():
                         help="Languages to support")
     parser.add_argument("--default_language", type=str, default="en",
                         help="Default language")
+    
+    # Logging configuration
+    parser.add_argument("--logger", type=str, default="tensorboard", choices=["tensorboard", "wandb"],
+                        help="Logger type")
+    parser.add_argument("--log_samples", action="store_true",
+                        help="Log sample outputs during training")
     
     # Other options
     parser.add_argument("--mixed_precision", type=str, default="fp16", choices=["none", "fp16", "bf16"],
@@ -222,6 +258,18 @@ def main():
                         help="Device to use for training")
     
     args = parser.parse_args()
+    
+    # Handle deprecated arguments
+    if args.pretrain is None and args.base_model_path is not None:
+        args.pretrain = args.base_model_path
+    
+    if args.pretrain is None:
+        raise ValueError("Either --pretrain or --base_model_path must be specified")
+    
+    # Use the more specific argument names
+    batch_size_per_gpu = args.batch_size_per_gpu if args.batch_size_per_gpu != 16 else args.batch_size
+    num_warmup_updates = args.num_warmup_updates if args.num_warmup_updates != 1000 else args.warmup_steps
+    save_per_updates = args.save_per_updates if args.save_per_updates != 1000 else args.save_steps
     
     # Setup device
     if args.device == "auto":
@@ -235,11 +283,16 @@ def main():
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Setup tokenizer
-    print("Setting up extended tokenizer for Romanian...")
-    vocab_char_map, vocab_size = create_romanian_tokenizer(
-        base_tokenizer_path=args.romanian_dataset,
-        romanian_data_path=args.romanian_dataset
-    )
+    print(f"Setting up tokenizer: {args.tokenizer}")
+    if args.tokenizer == "char":
+        # For character-based tokenizer, extend for Romanian
+        vocab_char_map, vocab_size = create_romanian_tokenizer(
+            base_tokenizer_path=args.romanian_dataset or args.dataset_name,
+            romanian_data_path=args.romanian_dataset or args.dataset_name
+        )
+    else:
+        # For pinyin tokenizer, use standard approach
+        vocab_char_map, vocab_size = get_tokenizer(args.dataset_name, args.tokenizer)
     
     # Setup adapter configuration
     adapter_config = AdapterConfig(
@@ -266,43 +319,46 @@ def main():
     # Setup model
     print("Setting up model with adapters...")
     model = setup_adapter_model(
-        base_model_path=args.base_model_path,
+        base_model_path=args.pretrain,
         adapter_config=adapter_config,
         vocab_size=vocab_size
     )
     
-    # Freeze base model parameters
-    freeze_base_model(model, adapter_config)
+    # Freeze base model parameters if finetuning
+    if args.finetune:
+        freeze_base_model(model, adapter_config)
     
     # Setup trainer
     trainer = Trainer(
         model,
         epochs=args.epochs,
         learning_rate=args.learning_rate,
-        num_warmup_updates=args.warmup_steps,
-        save_per_updates=args.save_steps,
-        keep_last_n_checkpoints=3,
+        num_warmup_updates=num_warmup_updates,
+        save_per_updates=save_per_updates,
+        keep_last_n_checkpoints=args.keep_last_n_checkpoints,
         checkpoint_path=args.output_dir,
-        batch_size_per_gpu=args.batch_size,
-        batch_size_type="sample",
-        max_samples=64,
-        grad_accumulation_steps=1,
-        max_grad_norm=1.0,
-        logger="tensorboard",
+        batch_size_per_gpu=batch_size_per_gpu,
+        batch_size_type=args.batch_size_type,
+        max_samples=args.max_samples,
+        grad_accumulation_steps=args.grad_accumulation_steps,
+        max_grad_norm=args.max_grad_norm,
+        logger=args.logger,
         wandb_project="F5-TTS-Romanian-Adapters",
-        wandb_run_name=f"adapter_{args.adapter_type}_rank_{args.adapter_rank}",
-        log_samples=True,
-        last_per_updates=args.save_steps,
+        wandb_run_name=args.exp_name,
+        log_samples=args.log_samples,
+        last_per_updates=args.last_per_updates,
         mel_spec_type="vocos",
         is_local_vocoder=False,
         model_cfg_dict=vars(args),
     )
     
     # Load dataset
-    print("Loading Romanian dataset...")
+    print(f"Loading dataset: {args.dataset_name}")
+    dataset_path = args.romanian_dataset or args.dataset_name
+    
     train_dataset = load_dataset(
-        args.romanian_dataset,
-        tokenizer="char",
+        dataset_path,
+        tokenizer=args.tokenizer,
         mel_spec_kwargs=dict(
             n_fft=1024,
             hop_length=256,
