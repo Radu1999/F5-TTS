@@ -66,6 +66,7 @@ def main(model_cfg):
     )
 
     train_dataset = load_dataset(model_cfg.datasets.name, tokenizer, mel_spec_kwargs=model_cfg.model.mel_spec)
+    print(len(train_dataset))
     trainer.train(
         train_dataset,
         num_workers=model_cfg.datasets.num_workers,

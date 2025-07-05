@@ -89,7 +89,6 @@ def freeze_base_model(model: nn.Module, adapter_config: AdapterConfig) -> None:
 
 
 def setup_adapter_model(
-    base_model_path: str,
     adapter_config: AdapterConfig,
     vocab_size: int,
     mel_dim: int = 100
@@ -98,7 +97,6 @@ def setup_adapter_model(
     Setup the F5-TTS model with adapters.
     
     Args:
-        base_model_path: Path to the base pre-trained model
         adapter_config: Configuration for adapters
         vocab_size: Size of the extended vocabulary
         mel_dim: Mel spectrogram dimension
@@ -137,35 +135,6 @@ def setup_adapter_model(
         mel_spec_kwargs=mel_spec_kwargs,
         adapter_config=adapter_config,
     )
-    
-    # Load base model weights
-    if os.path.exists(base_model_path):
-        print(f"Loading base model from: {base_model_path}")
-        
-        if base_model_path.endswith('.safetensors'):
-            from safetensors.torch import load_file
-            checkpoint = {"ema_model_state_dict": load_file(base_model_path, device="cpu")}
-        else:
-            checkpoint = torch.load(base_model_path, map_location="cpu")
-        
-        # Load weights, ignoring adapter-specific parameters
-        model_dict = model.state_dict()
-        pretrained_dict = checkpoint.get("ema_model_state_dict", checkpoint)
-        
-        # Filter out adapter parameters and size mismatches
-        filtered_dict = {}
-        for k, v in pretrained_dict.items():
-            if k in model_dict and model_dict[k].shape == v.shape:
-                if not any(adapter_name in k for adapter_name in [
-                    'language_adapters', 'attention_adapter', 'ff_adapter', 
-                    'text_embedding_adapter', 'language_embed'
-                ]):
-                    filtered_dict[k] = v
-        
-        model_dict.update(filtered_dict)
-        model.load_state_dict(model_dict, strict=False)
-        
-        print(f"Loaded {len(filtered_dict)} parameters from base model")
     
     return model
 
@@ -263,8 +232,29 @@ def main():
     if args.pretrain is None and args.base_model_path is not None:
         args.pretrain = args.base_model_path
     
-    if args.pretrain is None:
-        raise ValueError("Either --pretrain or --base_model_path must be specified")
+    # Setup checkpoint path like in finetune_cli
+    checkpoint_path = str(files("f5_tts").joinpath(f"../../ckpts/{args.dataset_name}"))
+    
+    # Handle checkpoint loading like in finetune_cli
+    if args.finetune:
+        if args.pretrain is None:
+            # Use default F5TTS_Base checkpoint
+            ckpt_path = str(cached_path("hf://SWivid/F5-TTS/F5TTS_Base/model_1200000.pt"))
+        else:
+            ckpt_path = args.pretrain
+        
+        # Create checkpoint directory if it doesn't exist
+        if not os.path.isdir(checkpoint_path):
+            os.makedirs(checkpoint_path, exist_ok=True)
+        
+        # Copy checkpoint with pretrained_ prefix like in finetune_cli
+        file_checkpoint = os.path.basename(ckpt_path)
+        if not file_checkpoint.startswith("pretrained_"):
+            file_checkpoint = "pretrained_" + file_checkpoint
+        file_checkpoint = os.path.join(checkpoint_path, file_checkpoint)
+        if not os.path.isfile(file_checkpoint):
+            shutil.copy2(ckpt_path, file_checkpoint)
+            print("copy checkpoint for finetune")
     
     # Use the more specific argument names
     batch_size_per_gpu = args.batch_size_per_gpu if args.batch_size_per_gpu != 16 else args.batch_size
@@ -319,13 +309,13 @@ def main():
     # Setup model
     print("Setting up model with adapters...")
     model = setup_adapter_model(
-        base_model_path=args.pretrain,
         adapter_config=adapter_config,
         vocab_size=vocab_size
     )
     
     # Freeze base model parameters if finetuning
     if args.finetune:
+        print('Model base frozen')
         freeze_base_model(model, adapter_config)
     
     # Setup trainer
@@ -336,7 +326,7 @@ def main():
         num_warmup_updates=num_warmup_updates,
         save_per_updates=save_per_updates,
         keep_last_n_checkpoints=args.keep_last_n_checkpoints,
-        checkpoint_path=args.output_dir,
+        checkpoint_path=checkpoint_path,
         batch_size_per_gpu=batch_size_per_gpu,
         batch_size_type=args.batch_size_type,
         max_samples=args.max_samples,
@@ -383,7 +373,7 @@ def main():
     )
     
     print("Training completed!")
-    print(f"Adapters saved to: {args.output_dir}")
+    print(f"Adapters saved to: {checkpoint_path}")
 
 
 if __name__ == "__main__":

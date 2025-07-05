@@ -281,7 +281,7 @@ class Trainer:
                 train_dataset,
                 collate_fn=collate_fn,
                 num_workers=num_workers,
-                pin_memory=True,
+                pin_memory=False,
                 persistent_workers=True,
                 batch_size=self.batch_size_per_gpu,
                 shuffle=True,

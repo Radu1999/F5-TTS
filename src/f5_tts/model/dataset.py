@@ -328,3 +328,10 @@ def collate_fn(batch):
         text=text,
         text_lengths=text_lengths,
     )
+
+
+if __name__ == '__main__':
+
+    dataset = load_dataset('ro_tts')
+    print(dataset[0])
+    print('here')
