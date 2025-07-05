@@ -91,6 +91,7 @@ def freeze_base_model(model: nn.Module, adapter_config: AdapterConfig) -> None:
 def setup_adapter_model(
     adapter_config: AdapterConfig,
     vocab_size: int,
+    vocab_char_map: dict,
     mel_dim: int = 100
 ) -> CFM:
     """
@@ -99,6 +100,7 @@ def setup_adapter_model(
     Args:
         adapter_config: Configuration for adapters
         vocab_size: Size of the extended vocabulary
+        vocab_char_map: Vocabulary character mapping
         mel_dim: Mel spectrogram dimension
         
     Returns:
@@ -111,7 +113,9 @@ def setup_adapter_model(
         heads=16,
         ff_mult=2,
         text_dim=512,
+        text_mask_padding=False,
         conv_layers=4,
+        pe_attn_head=1,
         adapter_config=adapter_config,
     )
     
@@ -133,10 +137,75 @@ def setup_adapter_model(
             mel_dim=mel_dim
         ),
         mel_spec_kwargs=mel_spec_kwargs,
+        vocab_char_map=vocab_char_map,
         adapter_config=adapter_config,
     )
     
     return model
+
+
+def load_pretrained_checkpoint(model: CFM, checkpoint_path: str) -> None:
+    """
+    Load pretrained checkpoint into the adapter model.
+    
+    Args:
+        model: The adapter model to load weights into
+        checkpoint_path: Path to the pretrained checkpoint
+    """
+    print(f"Loading pretrained checkpoint from: {checkpoint_path}")
+    
+    # Load checkpoint
+    if checkpoint_path.endswith(".safetensors"):
+        from safetensors.torch import load_file
+        checkpoint = load_file(checkpoint_path, device="cpu")
+        checkpoint = {"ema_model_state_dict": checkpoint}
+    else:
+        checkpoint = torch.load(checkpoint_path, weights_only=True, map_location="cpu")
+    
+    # Handle different checkpoint formats
+    if "ema_model_state_dict" in checkpoint:
+        # Use EMA weights
+        state_dict = checkpoint["ema_model_state_dict"]
+    elif "model_state_dict" in checkpoint:
+        # Use regular model weights
+        state_dict = checkpoint["model_state_dict"]
+    else:
+        # Assume it's a direct state dict
+        state_dict = checkpoint
+    
+    # Remove incompatible keys for backward compatibility
+    for key in ["mel_spec.mel_stft.mel_scale.fb", "mel_spec.mel_stft.spectrogram.window"]:
+        if key in state_dict:
+            del state_dict[key]
+    
+    # Load weights, ignoring adapter-specific keys
+    model_state_dict = model.state_dict()
+    loaded_keys = []
+    ignored_keys = []
+    
+    for key, value in state_dict.items():
+        # Skip adapter-specific keys as they should be randomly initialized
+        if any(adapter_key in key for adapter_key in [
+            'language_adapters', 'attention_adapter', 'ff_adapter', 
+            'text_embedding_adapter', 'language_embed'
+        ]):
+            ignored_keys.append(key)
+            continue
+            
+        if key in model_state_dict and model_state_dict[key].shape == value.shape:
+            model_state_dict[key] = value
+            loaded_keys.append(key)
+        else:
+            ignored_keys.append(key)
+    
+    model.load_state_dict(model_state_dict, strict=False)
+    
+    print(f"Loaded {len(loaded_keys)} keys from pretrained checkpoint")
+    if ignored_keys:
+        print(f"Ignored {len(ignored_keys)} keys (adapters or incompatible shapes)")
+        if len(ignored_keys) <= 10:  # Only show first 10 ignored keys
+            for key in ignored_keys[:10]:
+                print(f"  - {key}")
 
 
 def main():
@@ -310,8 +379,24 @@ def main():
     print("Setting up model with adapters...")
     model = setup_adapter_model(
         adapter_config=adapter_config,
-        vocab_size=vocab_size
+        vocab_size=vocab_size,
+        vocab_char_map=vocab_char_map
     )
+    
+    # Load pretrained checkpoint if finetuning
+    if args.finetune:
+        # Find the pretrained checkpoint file
+        pretrained_checkpoint = None
+        if os.path.exists(checkpoint_path):
+            for file in os.listdir(checkpoint_path):
+                if file.startswith("pretrained_"):
+                    pretrained_checkpoint = os.path.join(checkpoint_path, file)
+                    break
+        
+        if pretrained_checkpoint and os.path.exists(pretrained_checkpoint):
+            load_pretrained_checkpoint(model, pretrained_checkpoint)
+        else:
+            print("Warning: No pretrained checkpoint found. Starting with random weights.")
     
     # Freeze base model parameters if finetuning
     if args.finetune:
@@ -358,11 +443,6 @@ def main():
             mel_spec_type="vocos",
         )
     )
-    
-    # Add language information to dataset
-    def add_language_info(batch):
-        batch["language"] = "ro"  # Romanian language
-        return batch
     
     # Start training
     print("Starting adapter training...")
