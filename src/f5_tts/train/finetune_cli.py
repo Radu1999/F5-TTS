@@ -180,6 +180,15 @@ def main():
         vocab_char_map=vocab_char_map,
     )
 
+    # Freeze model params
+
+    for p in model.parameters():
+        p.requires_grad = False
+
+    # unfreeze text embeddings
+    for p in model.transformer.text_embed.parameters():
+        p.requires_grad = True
+
     trainer = Trainer(
         model,
         args.epochs,
