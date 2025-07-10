@@ -186,7 +186,7 @@ def main():
         p.requires_grad = False
 
     # unfreeze text embeddings
-    for p in model.transformer.text_embed.parameters():
+    for p in model.transformer.text_embed.text_embed.parameters():
         p.requires_grad = True
 
     trainer = Trainer(
