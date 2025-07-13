@@ -271,7 +271,7 @@ Examples:
         parser.add_argument("--workers", type=int, help=f"Number of worker threads (default: {MAX_WORKERS})")
         args = parser.parse_args()
 
-        prepare_and_save_set(args.inp_dir, args.out_dir, is_finetune=not args.pretrain, num_workers=args.workers)
+        prepare_and_save_set(args.inp_dir, args.out_dir, is_finetune=not args.pretrain, num_workers=MAX_WORKERS)
     except KeyboardInterrupt:
         print("\nOperation cancelled by user. Cleaning up...")
         if executor is not None:
