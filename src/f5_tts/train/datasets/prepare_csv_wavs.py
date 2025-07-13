@@ -265,8 +265,8 @@ Examples:
     python prepare_csv_wavs.py /input/dataset/path /output/dataset/path --workers 4
             """,
         )
-        parser.add_argument("inp_dir", type=str, help="Input directory containing the data.")
-        parser.add_argument("out_dir", type=str, help="Output directory to save the prepared data.")
+        parser.add_argument("--inp_dir", type=str, help="Input directory containing the data.")
+        parser.add_argument("--out_dir", type=str, help="Output directory to save the prepared data.")
         parser.add_argument("--pretrain", action="store_true", help="Enable for new pretrain, otherwise is a fine-tune")
         parser.add_argument("--workers", type=int, help=f"Number of worker threads (default: {MAX_WORKERS})")
         args = parser.parse_args()
