@@ -182,12 +182,12 @@ def main():
 
     # Freeze model params
 
-    for p in model.parameters():
-        p.requires_grad = False
+    # for p in model.parameters():
+    #     p.requires_grad = False
 
     # unfreeze text embeddings
-    for p in model.transformer.text_embed.parameters():
-        p.requires_grad = True
+    # for p in model.transformer.text_embed.parameters():
+    #     p.requires_grad = True
 
     trainer = Trainer(
         model,
