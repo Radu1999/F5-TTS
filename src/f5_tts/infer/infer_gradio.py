@@ -84,7 +84,7 @@ def load_custom(ckpt_path: str, vocab_path="", model_cfg=None):
         model_cfg = json.loads(DEFAULT_TTS_MODEL_CFG[2])
     elif isinstance(model_cfg, str):
         model_cfg = json.loads(model_cfg)
-    return load_model(DiT, model_cfg, ckpt_path, vocab_file=vocab_path)
+    return load_model(DiT, model_cfg, ckpt_path, vocab_file=vocab_path, use_ema=False)
 
 
 F5TTS_ema_model = load_f5tts()
