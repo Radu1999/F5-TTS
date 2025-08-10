@@ -341,8 +341,9 @@ class Trainer:
             skipped_epoch = 0
 
         self.language_module.build_vq(self.model.transformer.text_embed.text_embed)
-
+        print('STARTED TRAINING')
         for epoch in range(skipped_epoch, self.epochs):
+            print('STARTED EPCH')
             self.model.train()
             if exists(resumable_with_seed) and epoch == skipped_epoch:
                 progress_bar_initial = math.ceil(skipped_batch / self.grad_accumulation_steps)
