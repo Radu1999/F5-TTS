@@ -33,7 +33,7 @@ def parse_args():
         choices=["F5TTS_v1_Base", "F5TTS_Base", "E2TTS_Base"],
         help="Experiment name",
     )
-    parser.add_argument("--dataset_name", type=str, default="ro_tts_common", help="Name of the dataset to use")
+    parser.add_argument("--dataset_name", type=str, default="ro_tts", help="Name of the dataset to use")
     parser.add_argument("--learning_rate", type=float, default=1e-5, help="Learning rate for training")
     parser.add_argument("--batch_size_per_gpu", type=int, default=3200, help="Batch size per GPU")
     parser.add_argument(
