@@ -218,19 +218,20 @@ class DiT(nn.Module):
             drop_audio_cond: bool = False,
             drop_text: bool = False,
             cache: bool = True,
+            text_embed=None,
     ):
         seq_len = x.shape[1]
         if cache:
             if drop_text:
                 if self.text_uncond is None:
-                    self.text_uncond = self.text_embed(text, seq_len, drop_text=True)
+                    self.text_uncond = self.text_embed(text, seq_len, drop_text=True, text_embed=text_embed)
                 text_embed = self.text_uncond
             else:
                 if self.text_cond is None:
-                    self.text_cond = self.text_embed(text, seq_len, drop_text=False)
+                    self.text_cond = self.text_embed(text, seq_len, drop_text=False, text_embed=text_embed)
                 text_embed = self.text_cond
         else:
-            text_embed = self.text_embed(text, seq_len, drop_text=drop_text)
+            text_embed = self.text_embed(text, seq_len, drop_text=drop_text, text_embed=text_embed)
 
         x = self.input_embed(x, cond, text_embed, drop_audio_cond=drop_audio_cond)
 
@@ -250,6 +251,7 @@ class DiT(nn.Module):
             drop_text: bool = False,  # cfg for text
             cfg_infer: bool = False,  # cfg inference, pack cond & uncond forward
             cache: bool = False,
+            text_embed=None,
     ):
         batch, seq_len = x.shape[0], x.shape[1]
         if time.ndim == 0:
@@ -258,13 +260,13 @@ class DiT(nn.Module):
         # t: conditioning time, text: text, x: noised audio + cond audio + text
         t = self.time_embed(time)
         if cfg_infer:  # pack cond & uncond forward: b n d -> 2b n d
-            x_cond = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False, cache=cache)
-            x_uncond = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True, cache=cache)
+            x_cond = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False, text_embed=text_embed, cache=cache)
+            x_uncond = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True, text_embed=text_embed, cache=cache)
             x = torch.cat((x_cond, x_uncond), dim=0)
             t = torch.cat((t, t), dim=0)
             mask = torch.cat((mask, mask), dim=0) if mask is not None else None
         else:
-            x = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond, drop_text=drop_text, cache=cache)
+            x = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond, drop_text=drop_text, cache=cache, text_embed=text_embed)
 
         rope = self.rotary_embed.forward_from_seq_len(seq_len)
 
