@@ -375,7 +375,7 @@ class Trainer:
                         dur_loss = self.duration_predictor(mel_spec, lens=batch.get("durations"))
                         self.accelerator.log({"duration loss": dur_loss.item()}, step=global_update)
 
-                    text_embed, loss_vq = self.language_module(text=text_inputs)
+                    text_embed, loss_vq = self.language_module(text=text_inputs, seq_len=mel_spec.shape[1])
                     self.accelerator.log({"vq_loss": loss_vq.item()}, step=global_update)
                     loss, cond, pred = self.model(
                         mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler, text_embed=text_embed,
