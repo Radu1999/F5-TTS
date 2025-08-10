@@ -39,7 +39,7 @@ def parse_args():
     parser.add_argument(
         "--batch_size_type", type=str, default="frame", choices=["frame", "sample"], help="Batch size type"
     )
-    parser.add_argument("--max_samples", type=int, default=64, help="Max sequences per batch")
+    parser.add_argument("--max_samples", type=int, default=4, help="Max sequences per batch")
     parser.add_argument("--grad_accumulation_steps", type=int, default=1, help="Gradient accumulation steps")
     parser.add_argument("--max_grad_norm", type=float, default=1.0, help="Max gradient norm for clipping")
     parser.add_argument("--epochs", type=int, default=100, help="Number of training epochs")
@@ -197,7 +197,7 @@ def main():
     # for p in model.transformer.text_embed.parameters():
     #     p.requires_grad = True
 
-    language_module = LanguageModule(text_dim=512, conv_layers=4)
+    language_module = LanguageModule(text_dim=512, conv_layers=4, vocab_char_map=model.vocab_char_map)
 
     trainer = Trainer(
         model,
@@ -222,8 +222,9 @@ def main():
         bnb_optimizer=args.bnb_optimizer,
     )
 
-    train_dataset = load_dataset(args.dataset_name, tokenizer, mel_spec_kwargs=mel_spec_kwargs)
 
+    train_dataset = load_dataset(args.dataset_name, tokenizer, mel_spec_kwargs=mel_spec_kwargs)
+    print('STARTED TRAINING')
     trainer.train(
         train_dataset,
         resumable_with_seed=666,  # seed for shuffling dataset

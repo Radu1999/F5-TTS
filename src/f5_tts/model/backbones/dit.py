@@ -26,17 +26,28 @@ from f5_tts.model.modules import (
     VQEmbedding
 )
 
+from f5_tts.model.utils import (
+    list_str_to_idx,
+)
+
 
 class LanguageModule(nn.Module):
-    def __init__(self, text_num_embeds=256, text_dim=None, conv_mult=2 ,conv_layers=4):
+    def __init__(self, text_num_embeds=256, text_dim=None, conv_mult=2 ,conv_layers=4, vocab_char_map=None):
         super().__init__()
         self.vq_layer = None
+        self.vocab_char_map=vocab_char_map
         self.text_blocks = nn.Sequential(
             *[ConvNeXtV2Block(text_dim, text_dim * conv_mult) for _ in range(conv_layers)]
         )
         self.text_embed = nn.Embedding(text_num_embeds + 1, text_dim)
 
     def forward(self, text: int["b nt"], seq_len, drop_text=False):  # noqa: F722
+        if isinstance(text, list):
+            if exists(self.vocab_char_map):
+                text = list_str_to_idx(text, self.vocab_char_map).to('cuda')
+            else:
+                text = list_str_to_tensor(text).to('cuda')
+            assert text.shape[0] == batch
         text = text + 1  # use 0 as filler token. preprocess of batch pad -1, see list_str_to_idx()
         text = text[:, :seq_len]  # curtail if character tokens are more than the mel spec tokens
         batch, text_len = text.shape[0], text.shape[1]
