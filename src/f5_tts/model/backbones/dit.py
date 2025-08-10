@@ -28,6 +28,7 @@ from f5_tts.model.modules import (
 
 from f5_tts.model.utils import (
     list_str_to_idx,
+    list_str_to_tensor
 )
 
 
