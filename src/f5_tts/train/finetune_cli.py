@@ -5,9 +5,12 @@ from importlib.resources import files
 
 from cached_path import cached_path
 
-from f5_tts.model import CFM, DiT, Trainer, UNetT
+from f5_tts.model import CFM, DiT, UNetT
+from f5_tts.model.language_trainer import Trainer
 from f5_tts.model.dataset import load_dataset
 from f5_tts.model.utils import get_tokenizer
+from f5_tts.model.backbones.dit import LanguageModule
+
 
 
 # -------------------------- Dataset Settings --------------------------- #
@@ -71,6 +74,7 @@ def parse_args():
         action="store_true",
         help="Use 8-bit Adam optimizer from bitsandbytes",
     )
+    parser.add_argument('--wandb_key', type=str, default=None, required=False)
 
     return parser.parse_args()
 
@@ -84,6 +88,9 @@ def main():
     checkpoint_path = str(files("f5_tts").joinpath(f"../../ckpts/{args.dataset_name}"))
 
     # Model parameters based on experiment name
+
+    import wandb
+    wandb.login(key=args.wandb_key)
 
     if args.exp_name == "F5TTS_v1_Base":
         wandb_resume_id = None
@@ -183,17 +190,20 @@ def main():
 
     # Freeze model params
 
-    # for p in model.parameters():
-    #     p.requires_grad = False
+    for p in model.parameters():
+        p.requires_grad = False
 
     # unfreeze text embeddings
     # for p in model.transformer.text_embed.parameters():
     #     p.requires_grad = True
 
+    language_module = LanguageModule(text_dim=512, conv_layers=4)
+
     trainer = Trainer(
         model,
         args.epochs,
         args.learning_rate,
+        language_module=language_module,
         num_warmup_updates=args.num_warmup_updates,
         save_per_updates=args.save_per_updates,
         keep_last_n_checkpoints=args.keep_last_n_checkpoints,

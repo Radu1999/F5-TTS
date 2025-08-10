@@ -234,6 +234,7 @@ class CFM(nn.Module):
         *,
         lens: int["b"] | None = None,  # noqa: F821
         noise_scheduler: str | None = None,
+        text_embed=None,
     ):
         # handle raw wave
         if inp.ndim == 2:
@@ -292,7 +293,7 @@ class CFM(nn.Module):
 
         # apply mask will use more memory; might adjust batchsize or batchsampler long sequence threshold
         pred = self.transformer(
-            x=φ, cond=cond, text=text, time=time, drop_audio_cond=drop_audio_cond, drop_text=drop_text, mask=mask
+            x=φ, cond=cond, text=text, time=time, drop_audio_cond=drop_audio_cond, drop_text=drop_text, mask=mask, text_embed=text_embed
         )
 
         # flow matching loss

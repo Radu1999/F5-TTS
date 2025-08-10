@@ -22,7 +22,6 @@ from x_transformers.x_transformers import apply_rotary_pos_emb
 
 from f5_tts.model.utils import is_package_available
 
-
 # raw wav to mel spec
 
 
@@ -31,15 +30,15 @@ hann_window_cache = {}
 
 
 def get_bigvgan_mel_spectrogram(
-    waveform,
-    n_fft=1024,
-    n_mel_channels=100,
-    target_sample_rate=24000,
-    hop_length=256,
-    win_length=1024,
-    fmin=0,
-    fmax=None,
-    center=False,
+        waveform,
+        n_fft=1024,
+        n_mel_channels=100,
+        target_sample_rate=24000,
+        hop_length=256,
+        win_length=1024,
+        fmin=0,
+        fmax=None,
+        center=False,
 ):  # Copy from https://github.com/NVIDIA/BigVGAN/tree/main
     device = waveform.device
     key = f"{n_fft}_{n_mel_channels}_{target_sample_rate}_{hop_length}_{win_length}_{fmin}_{fmax}_{device}"
@@ -75,13 +74,59 @@ def get_bigvgan_mel_spectrogram(
     return mel_spec
 
 
+class VQEmbedding(nn.Module):
+    def __init__(self, embedding_dim=128, commitment_cost=0.25, num_embeddings=2548, embedding: nn.Embedding = None):
+        super().__init__()
+        if not embedding:
+            self.embedding_dim = embedding_dim
+            self.num_embeddings = num_embeddings
+            self.commitment_cost = commitment_cost
+            self.embedding = nn.Embedding(num_embeddings, embedding_dim)
+            self.embedding.weight.data.uniform_(-1 / self.num_embeddings, 1 / self.num_embeddings)
+        else:
+            self.embedding = embedding
+            self.embedding_dim = self.embedding.weight.shape[1]
+            self.num_embeddings = self.embedding.weight.shape[1]
+
+    def forward(self, z):
+        b, c, h, w = z.shape
+        assert c == self.embedding_dim, f"Input channel {c} does not match embedding dim {self.embedding_dim}"
+        z_channel_last = z.permute(0, 2, 3, 1)
+        z_flattened = z_channel_last.reshape(b * h * w, self.embedding_dim)
+
+        # Calculate distances between z and the codebook embeddings |a-b|²
+        distances = (
+                torch.sum(z_flattened ** 2, dim=-1, keepdim=True)  # a²
+                + torch.sum(self.embedding.weight.t() ** 2, dim=0, keepdim=True)  # b²
+                - 2 * torch.matmul(z_flattened, self.embedding.weight.t())  # -2ab
+        )
+
+        # Get the index with the smallest distance
+        encoding_indices = torch.argmin(distances, dim=-1)
+
+        # Get the quantized vector
+        z_q = self.embedding(encoding_indices)
+        z_q = z_q.reshape(b, h, w, self.embedding_dim)
+        z_q = z_q.permute(0, 3, 1, 2)
+
+        # Calculate the commitment loss
+        loss = F.mse_loss(z_q, z.detach()) + self.commitment_cost * F.mse_loss(
+            z_q.detach(), z
+        )
+
+        # Straight-through estimator trick for gradient backpropagation
+        z_q = z + (z_q - z).detach()
+
+        return z_q, loss, encoding_indices
+
+
 def get_vocos_mel_spectrogram(
-    waveform,
-    n_fft=1024,
-    n_mel_channels=100,
-    target_sample_rate=24000,
-    hop_length=256,
-    win_length=1024,
+        waveform,
+        n_fft=1024,
+        n_mel_channels=100,
+        target_sample_rate=24000,
+        hop_length=256,
+        win_length=1024,
 ):
     mel_stft = torchaudio.transforms.MelSpectrogram(
         sample_rate=target_sample_rate,
@@ -106,13 +151,13 @@ def get_vocos_mel_spectrogram(
 
 class MelSpec(nn.Module):
     def __init__(
-        self,
-        n_fft=1024,
-        hop_length=256,
-        win_length=1024,
-        n_mel_channels=100,
-        target_sample_rate=24_000,
-        mel_spec_type="vocos",
+            self,
+            n_fft=1024,
+            hop_length=256,
+            win_length=1024,
+            n_mel_channels=100,
+            target_sample_rate=24_000,
+            mel_spec_type="vocos",
     ):
         super().__init__()
         assert mel_spec_type in ["vocos", "bigvgan"], print("We only support two extract mel backend: vocos or bigvgan")
@@ -214,8 +259,8 @@ def get_pos_embed_indices(start, length, max_pos, scale=1.0):
     # length = length if isinstance(length, int) else length.max()
     scale = scale * torch.ones_like(start, dtype=torch.float32)  # in case scale is a scalar
     pos = (
-        start.unsqueeze(1)
-        + (torch.arange(length, device=start.device, dtype=torch.float32).unsqueeze(0) * scale.unsqueeze(1)).long()
+            start.unsqueeze(1)
+            + (torch.arange(length, device=start.device, dtype=torch.float32).unsqueeze(0) * scale.unsqueeze(1)).long()
     )
     # avoid extra long error.
     pos = torch.where(pos < max_pos, pos, max_pos - 1)
@@ -243,10 +288,10 @@ class GRN(nn.Module):
 
 class ConvNeXtV2Block(nn.Module):
     def __init__(
-        self,
-        dim: int,
-        intermediate_dim: int,
-        dilation: int = 1,
+            self,
+            dim: int,
+            intermediate_dim: int,
+            dilation: int = 1,
     ):
         super().__init__()
         padding = (dilation * (7 - 1)) // 2
@@ -362,15 +407,15 @@ class FeedForward(nn.Module):
 
 class Attention(nn.Module):
     def __init__(
-        self,
-        processor: JointAttnProcessor | AttnProcessor,
-        dim: int,
-        heads: int = 8,
-        dim_head: int = 64,
-        dropout: float = 0.0,
-        context_dim: Optional[int] = None,  # if not None -> joint attention
-        context_pre_only: bool = False,
-        qk_norm: Optional[str] = None,
+            self,
+            processor: JointAttnProcessor | AttnProcessor,
+            dim: int,
+            heads: int = 8,
+            dim_head: int = 64,
+            dropout: float = 0.0,
+            context_dim: Optional[int] = None,  # if not None -> joint attention
+            context_pre_only: bool = False,
+            qk_norm: Optional[str] = None,
     ):
         super().__init__()
 
@@ -419,12 +464,12 @@ class Attention(nn.Module):
             self.to_out_c = nn.Linear(self.inner_dim, context_dim)
 
     def forward(
-        self,
-        x: float["b n d"],  # noised input x
-        c: float["b n d"] = None,  # context c
-        mask: bool["b n"] | None = None,
-        rope=None,  # rotary position embedding for x
-        c_rope=None,  # rotary position embedding for c
+            self,
+            x: float["b n d"],  # noised input x
+            c: float["b n d"] = None,  # context c
+            mask: bool["b n"] | None = None,
+            rope=None,  # rotary position embedding for x
+            c_rope=None,  # rotary position embedding for c
     ) -> torch.Tensor:
         if c is not None:
             return self.processor(self, x, c=c, mask=mask, rope=rope, c_rope=c_rope)
@@ -441,10 +486,10 @@ if is_package_available("flash_attn"):
 
 class AttnProcessor:
     def __init__(
-        self,
-        pe_attn_head: int | None = None,  # number of attention head to apply rope, None for all
-        attn_backend: str = "torch",  # "torch" or "flash_attn"
-        attn_mask_enabled: bool = True,
+            self,
+            pe_attn_head: int | None = None,  # number of attention head to apply rope, None for all
+            attn_backend: str = "torch",  # "torch" or "flash_attn"
+            attn_mask_enabled: bool = True,
     ):
         if attn_backend == "flash_attn":
             assert is_package_available("flash_attn"), "Please install flash-attn first."
@@ -454,11 +499,11 @@ class AttnProcessor:
         self.attn_mask_enabled = attn_mask_enabled
 
     def __call__(
-        self,
-        attn: Attention,
-        x: float["b n d"],  # noised input x
-        mask: bool["b n"] | None = None,
-        rope=None,  # rotary position embedding
+            self,
+            attn: Attention,
+            x: float["b n d"],  # noised input x
+            mask: bool["b n"] | None = None,
+            rope=None,  # rotary position embedding
     ) -> torch.FloatTensor:
         batch_size = x.shape[0]
 
@@ -483,7 +528,7 @@ class AttnProcessor:
         # apply rotary position embedding
         if rope is not None:
             freqs, xpos_scale = rope
-            q_xpos_scale, k_xpos_scale = (xpos_scale, xpos_scale**-1.0) if xpos_scale is not None else (1.0, 1.0)
+            q_xpos_scale, k_xpos_scale = (xpos_scale, xpos_scale ** -1.0) if xpos_scale is not None else (1.0, 1.0)
 
             if self.pe_attn_head is not None:
                 pn = self.pe_attn_head
@@ -550,13 +595,13 @@ class JointAttnProcessor:
         pass
 
     def __call__(
-        self,
-        attn: Attention,
-        x: float["b n d"],  # noised input x
-        c: float["b nt d"] = None,  # context c, here text
-        mask: bool["b n"] | None = None,
-        rope=None,  # rotary position embedding for x
-        c_rope=None,  # rotary position embedding for c
+            self,
+            attn: Attention,
+            x: float["b n d"],  # noised input x
+            c: float["b nt d"] = None,  # context c, here text
+            mask: bool["b n"] | None = None,
+            rope=None,  # rotary position embedding for x
+            c_rope=None,  # rotary position embedding for c
     ) -> torch.FloatTensor:
         residual = x
 
@@ -595,12 +640,12 @@ class JointAttnProcessor:
         # apply rope for context and noised input independently
         if rope is not None:
             freqs, xpos_scale = rope
-            q_xpos_scale, k_xpos_scale = (xpos_scale, xpos_scale**-1.0) if xpos_scale is not None else (1.0, 1.0)
+            q_xpos_scale, k_xpos_scale = (xpos_scale, xpos_scale ** -1.0) if xpos_scale is not None else (1.0, 1.0)
             query = apply_rotary_pos_emb(query, freqs, q_xpos_scale)
             key = apply_rotary_pos_emb(key, freqs, k_xpos_scale)
         if c_rope is not None:
             freqs, xpos_scale = c_rope
-            q_xpos_scale, k_xpos_scale = (xpos_scale, xpos_scale**-1.0) if xpos_scale is not None else (1.0, 1.0)
+            q_xpos_scale, k_xpos_scale = (xpos_scale, xpos_scale ** -1.0) if xpos_scale is not None else (1.0, 1.0)
             c_query = apply_rotary_pos_emb(c_query, freqs, q_xpos_scale)
             c_key = apply_rotary_pos_emb(c_key, freqs, k_xpos_scale)
 
@@ -624,7 +669,7 @@ class JointAttnProcessor:
         # Split the attention outputs.
         x, c = (
             x[:, : residual.shape[1]],
-            x[:, residual.shape[1] :],
+            x[:, residual.shape[1]:],
         )
 
         # linear proj
@@ -647,16 +692,16 @@ class JointAttnProcessor:
 
 class DiTBlock(nn.Module):
     def __init__(
-        self,
-        dim,
-        heads,
-        dim_head,
-        ff_mult=4,
-        dropout=0.1,
-        qk_norm=None,
-        pe_attn_head=None,
-        attn_backend="torch",  # "torch" or "flash_attn"
-        attn_mask_enabled=True,
+            self,
+            dim,
+            heads,
+            dim_head,
+            ff_mult=4,
+            dropout=0.1,
+            qk_norm=None,
+            pe_attn_head=None,
+            attn_backend="torch",  # "torch" or "flash_attn"
+            attn_mask_enabled=True,
     ):
         super().__init__()
 
@@ -708,7 +753,7 @@ class MMDiTBlock(nn.Module):
     """
 
     def __init__(
-        self, dim, heads, dim_head, ff_mult=4, dropout=0.1, context_dim=None, context_pre_only=False, qk_norm=None
+            self, dim, heads, dim_head, ff_mult=4, dropout=0.1, context_dim=None, context_pre_only=False, qk_norm=None
     ):
         super().__init__()
         if context_dim is None:

@@ -13,6 +13,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from x_transformers.x_transformers import RotaryEmbedding
+from transformers import AutoModel, AutoTokenizer
 
 from f5_tts.model.modules import (
     AdaLayerNorm_Final,
@@ -22,10 +23,32 @@ from f5_tts.model.modules import (
     TimestepEmbedding,
     get_pos_embed_indices,
     precompute_freqs_cis,
+    VQEmbedding
 )
 
 
-# Text embedding
+class LanguageModule(nn.Module):
+    def __init__(self, text_num_embeds=256, text_dim=None, conv_mult=2 ,conv_layers=4):
+        super().__init__()
+        self.vq_layer = None
+        self.text_blocks = nn.Sequential(
+            *[ConvNeXtV2Block(text_dim, text_dim * conv_mult) for _ in range(conv_layers)]
+        )
+        self.text_embed = nn.Embedding(text_num_embeds + 1, text_dim)
+
+    def forward(self, text: int["b nt"], seq_len, drop_text=False):  # noqa: F722
+        text = text + 1  # use 0 as filler token. preprocess of batch pad -1, see list_str_to_idx()
+        text = text[:, :seq_len]  # curtail if character tokens are more than the mel spec tokens
+        batch, text_len = text.shape[0], text.shape[1]
+        text = F.pad(text, (0, seq_len - text_len), value=0)
+        for block in self.text_blocks:
+            text = block(text)
+            text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
+        z_q, loss, encoding_indices = self.vq_layer(text)
+        return z_q, loss
+
+    def build_vq(self, text_embed: nn.Embedding):
+        self.vq_layer = VQEmbedding(embedding=text_embed)
 
 
 class TextEmbedding(nn.Module):
@@ -45,18 +68,22 @@ class TextEmbedding(nn.Module):
         else:
             self.extra_modeling = False
 
-    def forward(self, text: int["b nt"], seq_len, drop_text=False):  # noqa: F722
+    def forward(self, text: int["b nt"], seq_len, text_embed=None, drop_text=False):  # noqa: F722
         text = text + 1  # use 0 as filler token. preprocess of batch pad -1, see list_str_to_idx()
         text = text[:, :seq_len]  # curtail if character tokens are more than the mel spec tokens
         batch, text_len = text.shape[0], text.shape[1]
-        text = F.pad(text, (0, seq_len - text_len), value=0)
-        if self.mask_padding:
-            text_mask = text == 0
 
-        if drop_text:  # cfg for text
-            text = torch.zeros_like(text)
+        if text_embed:
+          text = text_embed
+        else:
+            text = F.pad(text, (0, seq_len - text_len), value=0)
+            if self.mask_padding:
+                text_mask = text == 0
 
-        text = self.text_embed(text)  # b n -> b n d
+            if drop_text:  # cfg for text
+                text = torch.zeros_like(text)
+
+            text = self.text_embed(text)  # b n -> b n d
 
         # possible extra modeling
         if self.extra_modeling:
@@ -87,7 +114,8 @@ class InputEmbedding(nn.Module):
         self.proj = nn.Linear(mel_dim * 2 + text_dim, out_dim)
         self.conv_pos_embed = ConvPositionEmbedding(dim=out_dim)
 
-    def forward(self, x: float["b n d"], cond: float["b n d"], text_embed: float["b n d"], drop_audio_cond=False):  # noqa: F722
+    def forward(self, x: float["b n d"], cond: float["b n d"], text_embed: float["b n d"],
+                drop_audio_cond=False):  # noqa: F722
         if drop_audio_cond:  # cfg for cond audio
             cond = torch.zeros_like(cond)
 
@@ -101,25 +129,25 @@ class InputEmbedding(nn.Module):
 
 class DiT(nn.Module):
     def __init__(
-        self,
-        *,
-        dim,
-        depth=8,
-        heads=8,
-        dim_head=64,
-        dropout=0.1,
-        ff_mult=4,
-        mel_dim=100,
-        text_num_embeds=256,
-        text_dim=None,
-        text_mask_padding=True,
-        qk_norm=None,
-        conv_layers=0,
-        pe_attn_head=None,
-        attn_backend="torch",  # "torch" | "flash_attn"
-        attn_mask_enabled=False,
-        long_skip_connection=False,
-        checkpoint_activations=False,
+            self,
+            *,
+            dim,
+            depth=8,
+            heads=8,
+            dim_head=64,
+            dropout=0.1,
+            ff_mult=4,
+            mel_dim=100,
+            text_num_embeds=256,
+            text_dim=None,
+            text_mask_padding=True,
+            qk_norm=None,
+            conv_layers=0,
+            pe_attn_head=None,
+            attn_backend="torch",  # "torch" | "flash_attn"
+            attn_mask_enabled=False,
+            long_skip_connection=False,
+            checkpoint_activations=False,
     ):
         super().__init__()
 
@@ -183,13 +211,13 @@ class DiT(nn.Module):
         return ckpt_forward
 
     def get_input_embed(
-        self,
-        x,  # b n d
-        cond,  # b n d
-        text,  # b nt
-        drop_audio_cond: bool = False,
-        drop_text: bool = False,
-        cache: bool = True,
+            self,
+            x,  # b n d
+            cond,  # b n d
+            text,  # b nt
+            drop_audio_cond: bool = False,
+            drop_text: bool = False,
+            cache: bool = True,
     ):
         seq_len = x.shape[1]
         if cache:
@@ -212,16 +240,16 @@ class DiT(nn.Module):
         self.text_cond, self.text_uncond = None, None
 
     def forward(
-        self,
-        x: float["b n d"],  # nosied input audio  # noqa: F722
-        cond: float["b n d"],  # masked cond audio  # noqa: F722
-        text: int["b nt"],  # text  # noqa: F722
-        time: float["b"] | float[""],  # time step  # noqa: F821 F722
-        mask: bool["b n"] | None = None,  # noqa: F722
-        drop_audio_cond: bool = False,  # cfg for cond audio
-        drop_text: bool = False,  # cfg for text
-        cfg_infer: bool = False,  # cfg inference, pack cond & uncond forward
-        cache: bool = False,
+            self,
+            x: float["b n d"],  # nosied input audio  # noqa: F722
+            cond: float["b n d"],  # masked cond audio  # noqa: F722
+            text: int["b nt"],  # text  # noqa: F722
+            time: float["b"] | float[""],  # time step  # noqa: F821 F722
+            mask: bool["b n"] | None = None,  # noqa: F722
+            drop_audio_cond: bool = False,  # cfg for cond audio
+            drop_text: bool = False,  # cfg for text
+            cfg_infer: bool = False,  # cfg inference, pack cond & uncond forward
+            cache: bool = False,
     ):
         batch, seq_len = x.shape[0], x.shape[1]
         if time.ndim == 0:
