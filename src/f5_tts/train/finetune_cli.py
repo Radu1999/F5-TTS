@@ -198,6 +198,7 @@ def main():
     #     p.requires_grad = True
 
     language_module = LanguageModule(text_dim=512, conv_layers=4, vocab_char_map=model.vocab_char_map)
+    print(model.vocab_char_map)
 
     trainer = Trainer(
         model,
