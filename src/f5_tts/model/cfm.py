@@ -249,7 +249,7 @@ class CFM(nn.Module):
         batch, seq_len, dtype, device, _σ1 = *inp.shape[:2], inp.dtype, self.device, self.sigma
 
         # handle text as string
-        if isinstance(text, list) and text_embed is None:
+        if isinstance(text, list):
             if exists(self.vocab_char_map):
                 text = list_str_to_idx(text, self.vocab_char_map).to(device)
             else:
