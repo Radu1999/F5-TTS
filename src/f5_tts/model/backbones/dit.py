@@ -45,6 +45,7 @@ class LanguageModule(nn.Module):
 
     def forward(self, text: int["b nt"], seq_len, drop_text=False):  # noqa: F722
         if isinstance(text, list):
+            print(text)
             if exists(self.vocab_char_map):
                 text = list_str_to_idx(text, self.vocab_char_map).to('cuda')
             else:
