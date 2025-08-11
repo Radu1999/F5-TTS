@@ -46,7 +46,6 @@ class LanguageModule(nn.Module):
     def forward(self, text: int["b nt"], seq_len, drop_text=False):  # noqa: F722
         if isinstance(text, list):
             text = list_str_to_idx(text, self.vocab_char_map).to('cuda')
-            assert text.shape[0] == batch
         text = text + 1  # use 0 as filler token. preprocess of batch pad -1, see list_str_to_idx()
         text = text[:, :seq_len]  # curtail if character tokens are more than the mel spec tokens
         batch, text_len = text.shape[0], text.shape[1]
