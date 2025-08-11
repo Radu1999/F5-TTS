@@ -77,28 +77,28 @@ def get_bigvgan_mel_spectrogram(
 class VQEmbedding(nn.Module):
     def __init__(self, embedding_dim=128, commitment_cost=0.25, num_embeddings=2548, embedding: nn.Embedding = None):
         super().__init__()
+        self.commitment_cost = commitment_cost
         if not embedding:
             self.embedding_dim = embedding_dim
             self.num_embeddings = num_embeddings
-            self.commitment_cost = commitment_cost
             self.embedding = nn.Embedding(num_embeddings, embedding_dim)
             self.embedding.weight.data.uniform_(-1 / self.num_embeddings, 1 / self.num_embeddings)
         else:
             self.embedding = embedding
             self.embedding_dim = self.embedding.weight.shape[1]
-            self.num_embeddings = self.embedding.weight.shape[1]
+            self.num_embeddings = self.embedding.weight.shape[0]
 
     def forward(self, z):
-        b, c, h, w = z.shape
-        assert c == self.embedding_dim, f"Input channel {c} does not match embedding dim {self.embedding_dim}"
-        z_channel_last = z.permute(0, 2, 3, 1)
-        z_flattened = z_channel_last.reshape(b * h * w, self.embedding_dim)
+        # z: (b, n, d)
+        b, n, d = z.shape
+        assert d == self.embedding_dim, f"Input channel {d} does not match embedding dim {self.embedding_dim}"
+        z_flattened = z.reshape(b * n, d)
 
         # Calculate distances between z and the codebook embeddings |a-b|²
         distances = (
-                torch.sum(z_flattened ** 2, dim=-1, keepdim=True)  # a²
-                + torch.sum(self.embedding.weight.t() ** 2, dim=0, keepdim=True)  # b²
-                - 2 * torch.matmul(z_flattened, self.embedding.weight.t())  # -2ab
+            torch.sum(z_flattened**2, dim=-1, keepdim=True)  # a²
+            + torch.sum(self.embedding.weight.t() ** 2, dim=0, keepdim=True)  # b²
+            - 2 * torch.matmul(z_flattened, self.embedding.weight.t())  # -2ab
         )
 
         # Get the index with the smallest distance
@@ -106,13 +106,10 @@ class VQEmbedding(nn.Module):
 
         # Get the quantized vector
         z_q = self.embedding(encoding_indices)
-        z_q = z_q.reshape(b, h, w, self.embedding_dim)
-        z_q = z_q.permute(0, 3, 1, 2)
+        z_q = z_q.reshape(b, n, d)
 
         # Calculate the commitment loss
-        loss = F.mse_loss(z_q, z.detach()) + self.commitment_cost * F.mse_loss(
-            z_q.detach(), z
-        )
+        loss = F.mse_loss(z_q, z.detach()) + self.commitment_cost * F.mse_loss(z_q.detach(), z)
 
         # Straight-through estimator trick for gradient backpropagation
         z_q = z + (z_q - z).detach()

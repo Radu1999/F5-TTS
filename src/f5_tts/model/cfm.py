@@ -89,6 +89,7 @@ class CFM(nn.Module):
         lens: int["b"] | None = None,  # noqa: F821
         steps=32,
         cfg_strength=1.0,
+        language_module=None,
         sway_sampling_coef=None,
         seed: int | None = None,
         max_duration=4096,
@@ -163,11 +164,13 @@ class CFM(nn.Module):
             # step_cond = torch.where(cond_mask, cond, torch.zeros_like(cond))
 
             # predict flow (cond)
+            text_embeds, _ = language_module(text, seq_len=x.shape[1]) if language_module is not None else None
             if cfg_strength < 1e-5:
                 pred = self.transformer(
                     x=x,
                     cond=step_cond,
                     text=text,
+                    text_embed=text_embeds,
                     time=t,
                     mask=mask,
                     drop_audio_cond=False,
@@ -183,6 +186,7 @@ class CFM(nn.Module):
                 text=text,
                 time=t,
                 mask=mask,
+                text_embed=text_embeds,
                 cfg_infer=True,
                 cache=True,
             )
@@ -245,7 +249,7 @@ class CFM(nn.Module):
         batch, seq_len, dtype, device, _σ1 = *inp.shape[:2], inp.dtype, self.device, self.sigma
 
         # handle text as string
-        if isinstance(text, list):
+        if isinstance(text, list) and text_embed is None:
             if exists(self.vocab_char_map):
                 text = list_str_to_idx(text, self.vocab_char_map).to(device)
             else:

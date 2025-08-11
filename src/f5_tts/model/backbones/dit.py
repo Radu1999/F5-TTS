@@ -57,8 +57,6 @@ class LanguageModule(nn.Module):
 
         text = self.text_embed(text)
         text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
-
-
         for block in self.text_blocks:
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
@@ -66,7 +64,7 @@ class LanguageModule(nn.Module):
         return z_q, loss
 
     def build_vq(self, text_embed: nn.Embedding):
-        self.vq_layer = VQEmbedding(embedding=text_embed)
+        self.vq_layer = VQEmbedding(embedding=text_embed).to('cuda')
 
 
 class TextEmbedding(nn.Module):
@@ -87,21 +85,22 @@ class TextEmbedding(nn.Module):
             self.extra_modeling = False
 
     def forward(self, text: int["b nt"], seq_len, text_embed=None, drop_text=False):  # noqa: F722
-        text = text + 1  # use 0 as filler token. preprocess of batch pad -1, see list_str_to_idx()
-        text = text[:, :seq_len]  # curtail if character tokens are more than the mel spec tokens
-        batch, text_len = text.shape[0], text.shape[1]
-
-        if text_embed:
+        if text_embed is not None:
           text = text_embed
+          batch = text.shape[0]
         else:
-            text = F.pad(text, (0, seq_len - text_len), value=0)
-            if self.mask_padding:
-                text_mask = text == 0
+            text = text + 1  # use 0 as filler token. preprocess of batch pad -1, see list_str_to_idx()
+            text = text[:, :seq_len]  # curtail if character tokens are more than the mel spec tokens
+            batch, text_len = text.shape[0], text.shape[1]
 
+            text = F.pad(text, (0, seq_len - text_len), value=0)
             if drop_text:  # cfg for text
                 text = torch.zeros_like(text)
 
             text = self.text_embed(text)  # b n -> b n d
+
+        if self.mask_padding:
+            text_mask = text == 0
 
         # possible extra modeling
         if self.extra_modeling:
@@ -113,10 +112,10 @@ class TextEmbedding(nn.Module):
 
             # convnextv2 blocks
             if self.mask_padding:
-                text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
+                text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)) if text_embed is None else text_mask, 0.0)
                 for block in self.text_blocks:
                     text = block(text)
-                    text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
+                    text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)) if text_embed is None else text_mask, 0.0)
             else:
                 text = self.text_blocks(text)
 

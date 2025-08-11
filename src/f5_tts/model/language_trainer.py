@@ -101,6 +101,7 @@ class Trainer:
             self.writer = SummaryWriter(log_dir=f"runs/{wandb_run_name}")
 
         self.model = model
+        self.model.to(self.accelerator.device)
 
         if self.is_main:
             self.ema_model = EMA(model, include_online_model=False, **ema_kwargs)
@@ -141,6 +142,7 @@ class Trainer:
         else:
             self.optimizer = AdamW(language_module.parameters(), lr=learning_rate)
         self.language_module, self.optimizer = self.accelerator.prepare(self.language_module, self.optimizer)
+
 
     @property
     def is_main(self):
@@ -263,8 +265,14 @@ class Trainer:
         gc.collect()
         return update
 
-    def train(self, train_dataset: Dataset, num_workers=16, resumable_with_seed: int = None):
-        if self.log_samples:
+    def train(self, train_dataset: Dataset, num_workers=16, resumable_with_seed: int = None, sanity_check: bool = False):
+        if sanity_check:
+            num_workers = 0
+            pin_memory = False
+        else:
+            pin_memory = True
+
+        if self.log_samples or sanity_check:
             from f5_tts.infer.utils_infer import cfg_strength, load_vocoder, nfe_step, sway_sampling_coef
 
             vocoder = load_vocoder(
@@ -285,8 +293,8 @@ class Trainer:
                 train_dataset,
                 collate_fn=collate_fn,
                 num_workers=num_workers,
-                pin_memory=True,
-                persistent_workers=True,
+                pin_memory=pin_memory,
+                persistent_workers=num_workers > 0,
                 batch_size=self.batch_size_per_gpu,
                 shuffle=True,
                 generator=generator,
@@ -305,8 +313,8 @@ class Trainer:
                 train_dataset,
                 collate_fn=collate_fn,
                 num_workers=num_workers,
-                pin_memory=True,
-                persistent_workers=True,
+                pin_memory=pin_memory,
+                persistent_workers=num_workers > 0,
                 batch_sampler=batch_sampler,
             )
         else:
@@ -406,6 +414,39 @@ class Trainer:
                         self.writer.add_scalar("loss", loss.item(), global_update)
                         self.writer.add_scalar("lr", self.scheduler.get_last_lr()[0], global_update)
 
+                if sanity_check:
+                    print("Sanity check complete, running a sample generation.")
+                    if self.accelerator.is_local_main_process:
+                        ref_audio_len = mel_lengths[0]
+                        infer_text = [
+                            text_inputs[0] + ([" "] if isinstance(text_inputs[0], list) else " ") + text_inputs[0]
+                        ]
+                        with torch.inference_mode():
+                            generated, _ = self.accelerator.unwrap_model(self.model).sample(
+                                cond=mel_spec[0][:ref_audio_len].unsqueeze(0),
+                                text=infer_text,
+                                duration=ref_audio_len * 2,
+                                steps=nfe_step,
+                                cfg_strength=cfg_strength,
+                                sway_sampling_coef=sway_sampling_coef,
+                                language_module=self.language_module,
+                            )
+                            generated = generated.to(torch.float32)
+                            gen_mel_spec = generated[:, ref_audio_len:, :].permute(0, 2, 1).to(self.accelerator.device)
+                            ref_mel_spec = batch["mel"][0].unsqueeze(0)
+                            if self.vocoder_name == "vocos":
+                                gen_audio = vocoder.decode(gen_mel_spec).cpu()
+                                ref_audio = vocoder.decode(ref_mel_spec).cpu()
+                            elif self.vocoder_name == "bigvgan":
+                                gen_audio = vocoder(gen_mel_spec).squeeze(0).cpu()
+                                ref_audio = vocoder(ref_mel_spec).squeeze(0).cpu()
+
+                        torchaudio.save(f"{log_samples_path}/sanity_check_gen.wav", gen_audio, target_sample_rate)
+                        torchaudio.save(f"{log_samples_path}/sanity_check_ref.wav", ref_audio, target_sample_rate)
+                        self.model.train()
+                    print("Breaking training loop after sanity check.")
+                    break
+
                 if global_update % self.last_per_updates == 0 and self.accelerator.sync_gradients:
                     self.save_checkpoint(global_update, last=True)
 
@@ -425,6 +466,7 @@ class Trainer:
                                 steps=nfe_step,
                                 cfg_strength=cfg_strength,
                                 sway_sampling_coef=sway_sampling_coef,
+                                language_module=self.language_module
                             )
                             generated = generated.to(torch.float32)
                             gen_mel_spec = generated[:, ref_audio_len:, :].permute(0, 2, 1).to(self.accelerator.device)
@@ -443,6 +485,8 @@ class Trainer:
                             f"{log_samples_path}/update_{global_update}_ref.wav", ref_audio, target_sample_rate
                         )
                         self.model.train()
+            if sanity_check:
+                break
 
         self.save_checkpoint(global_update, last=True)
 

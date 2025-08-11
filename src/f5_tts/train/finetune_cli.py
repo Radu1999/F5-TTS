@@ -75,6 +75,7 @@ def parse_args():
         help="Use 8-bit Adam optimizer from bitsandbytes",
     )
     parser.add_argument('--wandb_key', type=str, default=None, required=False)
+    parser.add_argument('--sanity_check', action='store_true', help='Run one batch for sanity check.')
 
     return parser.parse_args()
 
@@ -197,7 +198,7 @@ def main():
     # for p in model.transformer.text_embed.parameters():
     #     p.requires_grad = True
 
-    language_module = LanguageModule(text_dim=512, conv_layers=4, vocab_char_map=model.vocab_char_map)
+    language_module = LanguageModule(text_dim=512, text_num_embeds=vocab_size, conv_layers=4, vocab_char_map=model.vocab_char_map)
     print(model.vocab_char_map)
 
     trainer = Trainer(
@@ -229,6 +230,7 @@ def main():
     trainer.train(
         train_dataset,
         resumable_with_seed=666,  # seed for shuffling dataset
+        sanity_check=args.sanity_check,
     )
 
 
