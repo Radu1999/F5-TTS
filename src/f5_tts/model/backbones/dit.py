@@ -34,7 +34,7 @@ from f5_tts.model.utils import (
 
 
 class LanguageModule(nn.Module):
-    def __init__(self, text_num_embeds=256, text_dim=None, conv_mult=2 ,conv_layers=4, vocab_char_map=None):
+    def __init__(self, text_num_embeds=256, text_dim=None, conv_mult=2 ,conv_layers=4, vocab_char_map=None, mask_padding=True):
         super().__init__()
         self.vq_layer = None
         self.vocab_char_map = vocab_char_map
@@ -42,6 +42,7 @@ class LanguageModule(nn.Module):
             *[ConvNeXtV2Block(text_dim, text_dim * conv_mult) for _ in range(conv_layers)]
         )
         self.text_embed = nn.Embedding(text_num_embeds + 1, text_dim)
+        self.mask_padding = mask_padding
 
     def forward(self, text: int["b nt"], seq_len, drop_text=False):  # noqa: F722
         if isinstance(text, list):
@@ -50,6 +51,12 @@ class LanguageModule(nn.Module):
         text = text[:, :seq_len]  # curtail if character tokens are more than the mel spec tokens
         batch, text_len = text.shape[0], text.shape[1]
         text = F.pad(text, (0, seq_len - text_len), value=0)
+
+        if self.mask_padding:
+            text_mask = text == 0
+        text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
+
+        text = self.text_embed(text)
         for block in self.text_blocks:
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
