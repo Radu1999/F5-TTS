@@ -114,7 +114,7 @@ class VQEmbedding(nn.Module):
 
         loss = self.commitment_cost * F.mse_loss(z, z_q.detach())
 
-        return z_q, loss, encoding_indices
+        return z_q, z, loss, encoding_indices
 
 
 # class VQEmbedding(nn.Module):
