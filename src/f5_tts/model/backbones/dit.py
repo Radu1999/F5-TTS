@@ -54,9 +54,11 @@ class LanguageModule(nn.Module):
 
         if self.mask_padding:
             text_mask = text == 0
-        text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
         text = self.text_embed(text)
+        text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
+
+
         for block in self.text_blocks:
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
