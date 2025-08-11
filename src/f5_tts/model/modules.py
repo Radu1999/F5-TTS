@@ -76,13 +76,17 @@ def get_bigvgan_mel_spectrogram(
 
 class VQEmbedding(nn.Module):
     def __init__(self, embedding_dim=128, commitment_cost=1.0, num_embeddings=2548,
-                 embedding: nn.Embedding = None, temperature=1.0, hard=False):
+                 embedding: nn.Embedding = None, temperature=10.0, hard=False,
+                 temperature_min=0.5, anneal_rate=0.999):
         super().__init__()
         self.commitment_cost = commitment_cost
         self.temperature = temperature
-        self.hard = hard  # Whether to use hard or soft Gumbel Softmax
+        self.hard = hard
 
-        if not embedding:
+        self.temperature_min = temperature_min
+        self.anneal_rate = anneal_rate
+
+        if embedding is None:
             self.embedding_dim = embedding_dim
             self.num_embeddings = num_embeddings
             self.embedding = nn.Embedding(num_embeddings, embedding_dim)
@@ -93,38 +97,29 @@ class VQEmbedding(nn.Module):
             self.num_embeddings = self.embedding.weight.shape[0]
 
     def forward(self, z):
-        # z: (b, n, d)
+        # Anneal temperature
+        self.temperature = max(self.temperature * self.anneal_rate, self.temperature_min)
+
         b, n, d = z.shape
         assert d == self.embedding_dim, f"Input channel {d} does not match embedding dim {self.embedding_dim}"
 
-        z_flattened = z.reshape(b * n, d)  # (b*n, d)
+        z_flattened = z.reshape(b * n, d)
 
-        # Calculate distances between z and the codebook embeddings |a-b|²
         distances = (
-                torch.sum(z_flattened ** 2, dim=-1, keepdim=True)  # a²
-                + torch.sum(self.embedding.weight.t() ** 2, dim=0, keepdim=True)  # b²
-                - 2 * torch.matmul(z_flattened, self.embedding.weight.t())  # -2ab
+            torch.sum(z_flattened ** 2, dim=-1, keepdim=True)  # a²
+            + torch.sum(self.embedding.weight.t() ** 2, dim=0, keepdim=True)  # b²
+            - 2 * torch.matmul(z_flattened, self.embedding.weight.t())  # -2ab
         )
 
-        # Convert distances to logits (negative distances for probabilities)
-        logits = -distances / self.temperature  # (b*n, num_embeddings)
+        logits = -distances / self.temperature
 
-        # Apply Gumbel Softmax
         gumbel_weights = F.gumbel_softmax(logits, tau=self.temperature, hard=self.hard, dim=-1)
 
-        # Get quantized representation using the Gumbel weights
-        # gumbel_weights: (b*n, num_embeddings)
-        # embedding.weight: (num_embeddings, d)
-        z_q = torch.matmul(gumbel_weights, self.embedding.weight)  # (b*n, d)
-        z_q = z_q.reshape(b, n, d)
+        z_q = torch.matmul(gumbel_weights, self.embedding.weight).reshape(b, n, d)
 
         encoding_indices = torch.argmax(gumbel_weights, dim=-1)
 
-        # Calculate commitment loss (encourage encoder output to be close to chosen embedding)
         loss = self.commitment_cost * F.mse_loss(z, z_q.detach())
-
-        # With Gumbel Softmax, gradients flow naturally through z_q
-        # No need for straight-through estimator
 
         return z_q, loss, encoding_indices
 
