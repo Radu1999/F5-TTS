@@ -66,7 +66,7 @@ class LanguageModule(nn.Module):
         return z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0), loss
 
     def build_vq(self, text_embed: nn.Embedding):
-        self.vq_layer = VQEmbedding(embedding=text_embed).to('cuda')
+        self.vq_layer = VQEmbedding(embedding=text_embed, embedding_dim=text_embed.weight.shape[1]).to('cuda')
         self.codebook = text_embed
 
 
