@@ -152,9 +152,8 @@ class Trainer:
         self.accelerator.wait_for_everyone()
         if self.is_main:
             checkpoint = dict(
-                model_state_dict=self.accelerator.unwrap_model(self.model).state_dict(),
+                language_module_state_dict=self.accelerator.unwrap_model(self.language_module).state_dict(),
                 optimizer_state_dict=self.optimizer.state_dict(),
-                ema_model_state_dict=self.ema_model.state_dict(),
                 scheduler_state_dict=self.scheduler.state_dict(),
                 update=update,
             )
@@ -192,17 +191,49 @@ class Trainer:
             return 0
 
         self.accelerator.wait_for_everyone()
+        all_checkpoints = [
+            f
+            for f in os.listdir(self.checkpoint_path)
+            if (f.startswith("model_") or f.startswith("pretrained_")) and f.endswith((".pt", ".safetensors"))
+        ]
+        
+        pretrained_checkpoint_files = [f for f in all_checkpoints if f.startswith("pretrained_")]
+        if not pretrained_checkpoint_files:
+            print("F5-TTS WARNING: No pretrained model found. The main model will not be loaded.")
+        else:
+            pretrained_checkpoint = pretrained_checkpoint_files[0]
+            print(f"Loading pretrained model from {pretrained_checkpoint}")
+            if pretrained_checkpoint.endswith(".safetensors"):
+                from safetensors.torch import load_file
+
+                checkpoint = load_file(f"{self.checkpoint_path}/{pretrained_checkpoint}", device="cpu")
+                checkpoint = {"ema_model_state_dict": checkpoint}
+            else: # .pt
+                checkpoint = torch.load(f"{self.checkpoint_path}/{pretrained_checkpoint}", weights_only=True, map_location="cpu")
+            
+            # patch for backward compatibility, 305e3ea
+            for key in ["ema_model.mel_spec.mel_stft.mel_scale.fb", "ema_model.mel_spec.mel_stft.spectrogram.window"]:
+                if key in checkpoint["ema_model_state_dict"]:
+                    del checkpoint["ema_model_state_dict"][key]
+            
+            if self.is_main:
+                self.ema_model.load_state_dict(checkpoint["ema_model_state_dict"])
+
+            model_state_dict = {
+                k.replace("ema_model.", ""): v
+                for k, v in checkpoint["ema_model_state_dict"].items()
+                if k not in ["initted", "update", "step"]
+            }
+            self.accelerator.unwrap_model(self.model).load_state_dict(model_state_dict)
+            del checkpoint
+            gc.collect()
+
+        self.language_module.build_vq(self.model.transformer.text_embed.text_embed)
+
+        update = 0
         if "model_last.pt" in os.listdir(self.checkpoint_path):
             latest_checkpoint = "model_last.pt"
         else:
-            # Updated to consider pretrained models for loading but prioritize training checkpoints
-            all_checkpoints = [
-                f
-                for f in os.listdir(self.checkpoint_path)
-                if (f.startswith("model_") or f.startswith("pretrained_")) and f.endswith((".pt", ".safetensors"))
-            ]
-
-            # First try to find regular training checkpoints
             training_checkpoints = [f for f in all_checkpoints if f.startswith("model_") and f != "model_last.pt"]
             if training_checkpoints:
                 latest_checkpoint = sorted(
@@ -210,59 +241,21 @@ class Trainer:
                     key=lambda x: int("".join(filter(str.isdigit, x))),
                 )[-1]
             else:
-                # If no training checkpoints, use pretrained model
-                latest_checkpoint = next(f for f in all_checkpoints if f.startswith("pretrained_"))
-
-        if latest_checkpoint.endswith(".safetensors"):  # always a pretrained checkpoint
-            from safetensors.torch import load_file
-
-            checkpoint = load_file(f"{self.checkpoint_path}/{latest_checkpoint}", device="cpu")
-            checkpoint = {"ema_model_state_dict": checkpoint}
-        elif latest_checkpoint.endswith(".pt"):
-            # checkpoint = torch.load(f"{self.checkpoint_path}/{latest_checkpoint}", map_location=self.accelerator.device)  # rather use accelerator.load_state ಥ_ಥ
-            checkpoint = torch.load(
-                f"{self.checkpoint_path}/{latest_checkpoint}", weights_only=True, map_location="cpu"
-            )
-
-        # patch for backward compatibility, 305e3ea
-        for key in ["ema_model.mel_spec.mel_stft.mel_scale.fb", "ema_model.mel_spec.mel_stft.spectrogram.window"]:
-            if key in checkpoint["ema_model_state_dict"]:
-                del checkpoint["ema_model_state_dict"][key]
-
-        if self.is_main:
-            self.ema_model.load_state_dict(checkpoint["ema_model_state_dict"])
-
-        if "update" in checkpoint or "step" in checkpoint:
-            # patch for backward compatibility, with before f992c4e
-            if "step" in checkpoint:
-                checkpoint["update"] = checkpoint["step"] // self.grad_accumulation_steps
-                if self.grad_accumulation_steps > 1 and self.is_main:
-                    print(
-                        "F5-TTS WARNING: Loading checkpoint saved with per_steps logic (before f992c4e), will convert to per_updates according to grad_accumulation_steps setting, may have unexpected behaviour."
-                    )
-            # patch for backward compatibility, 305e3ea
-            for key in ["mel_spec.mel_stft.mel_scale.fb", "mel_spec.mel_stft.spectrogram.window"]:
-                if key in checkpoint["model_state_dict"]:
-                    del checkpoint["model_state_dict"][key]
-
-            self.accelerator.unwrap_model(self.model).load_state_dict(checkpoint["model_state_dict"])
-
-            # Currently disable optimizer load
-            # self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+                latest_checkpoint = None
+        
+        if latest_checkpoint:
+            print(f"Resuming language_module training from {latest_checkpoint}")
+            checkpoint = torch.load(f"{self.checkpoint_path}/{latest_checkpoint}", weights_only=True, map_location="cpu")
+            
+            self.accelerator.unwrap_model(self.language_module).load_state_dict(checkpoint["language_module_state_dict"])
+            self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
             if self.scheduler:
                 self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
             update = checkpoint["update"]
-        else:
-            checkpoint["model_state_dict"] = {
-                k.replace("ema_model.", ""): v
-                for k, v in checkpoint["ema_model_state_dict"].items()
-                if k not in ["initted", "update", "step"]
-            }
-            self.accelerator.unwrap_model(self.model).load_state_dict(checkpoint["model_state_dict"])
-            update = 0
 
-        del checkpoint
-        gc.collect()
+            del checkpoint
+            gc.collect()
+
         return update
 
     def train(self, train_dataset: Dataset, num_workers=16, resumable_with_seed: int = None, sanity_check: bool = False):
@@ -348,7 +341,6 @@ class Trainer:
         else:
             skipped_epoch = 0
 
-        self.language_module.build_vq(self.model.transformer.text_embed.text_embed)
         print('STARTED TRAINING')
         for epoch in range(skipped_epoch, self.epochs):
             print('STARTED EPCH')
@@ -459,7 +451,7 @@ class Trainer:
                             text_inputs[0] + ([" "] if isinstance(text_inputs[0], list) else " ") + text_inputs[0]
                         ]
                         with torch.inference_mode():
-                            generated, _ = self.accelerator.unwrap_model(self.model).sample(
+                            generated, _ = self.accelerator.unwrap_model(self.model).smple(
                                 cond=mel_spec[0][:ref_audio_len].unsqueeze(0),
                                 text=infer_text,
                                 duration=ref_audio_len * 2,

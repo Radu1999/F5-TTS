@@ -164,7 +164,7 @@ class CFM(nn.Module):
             # step_cond = torch.where(cond_mask, cond, torch.zeros_like(cond))
 
             # predict flow (cond)
-            text_embeds, _ = language_module(text, seq_len=x.shape[1]) if language_module is not None else (None, None)
+            text_embeds, _ = language_module(text, seq_len=x.shape[1], inference=True) if language_module is not None else (None, None)
             if cfg_strength < 1e-5:
                 pred = self.transformer(
                     x=x,

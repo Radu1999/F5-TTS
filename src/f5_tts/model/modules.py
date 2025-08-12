@@ -114,7 +114,22 @@ class VQEmbedding(nn.Module):
 
         loss = self.commitment_cost * F.mse_loss(z, z_q.detach())
 
-        return z_q, z, loss, encoding_indices
+        return z_q, loss, encoding_indices
+
+    def inference(self, z):
+        b, n, d = z.shape
+        assert d == self.embedding_dim, f"Input channel {d} != {self.embedding_dim}"
+
+        z_flattened = z.reshape(b * n, d)
+        logits = self.classifier(z_flattened)
+
+        # Directly pick the argmax embedding index
+        indices = torch.argmax(logits, dim=-1)
+
+        # Get embeddings from the codebook
+        z_q = self.embedding(indices).reshape(b, n, d)
+
+        return z_q, None, indices
 
 
 # class VQEmbedding(nn.Module):
