@@ -258,18 +258,6 @@ class Trainer:
 
         return update
 
-    def log_codebook_usage(self, codebook_usage, step):
-        if self.logger == "wandb":
-            total_usage = torch.sum(codebook_usage)
-            if total_usage > 0:
-                normalized_usage = codebook_usage / total_usage
-            else:
-                normalized_usage = codebook_usage
-            self.accelerator.log(
-                {"codebook_usage": wandb.Histogram(normalized_usage.cpu().numpy())},
-                step=step
-            )
-
     def train(self, train_dataset: Dataset, num_workers=16, resumable_with_seed: int = None, sanity_check: bool = False):
         if sanity_check:
             num_workers = 0
@@ -460,9 +448,6 @@ class Trainer:
 
                 if global_update % self.save_per_updates == 0 and self.accelerator.sync_gradients:
                     self.save_checkpoint(global_update)
-
-                    if self.is_main:
-                        self.language_module.log_codebook_usage(self, global_update)
 
                     if self.log_samples and self.accelerator.is_local_main_process:
                         ref_audio_len = mel_lengths[0]

@@ -62,20 +62,13 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
-        if inference:
-            z_q, loss, encoding_indices = self.vq_layer(text, hard=True)
-        else:
-            z_q, loss, encoding_indices = self.vq_layer(text)
+        z_q, loss, encoding_indices = self.vq_layer(text, hard=inference)
 
         return z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0), loss
 
     def build_vq(self, text_embed: nn.Embedding):
         self.vq_layer = VQEmbedding(embedding=text_embed, embedding_dim=text_embed.weight.shape[1]).to('cuda')
         self.codebook = text_embed
-
-    def log_codebook_usage(self, logger, step):
-        if self.vq_layer is not None:
-            logger.log_codebook_usage(self.vq_layer.codebook_usage, step)
 
 
 class TextEmbedding(nn.Module):
