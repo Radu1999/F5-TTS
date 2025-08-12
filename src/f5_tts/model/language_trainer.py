@@ -451,7 +451,7 @@ class Trainer:
                             text_inputs[0] + ([" "] if isinstance(text_inputs[0], list) else " ") + text_inputs[0]
                         ]
                         with torch.inference_mode():
-                            generated, _ = self.accelerator.unwrap_model(self.model).smple(
+                            generated, _ = self.accelerator.unwrap_model(self.model).sample(
                                 cond=mel_spec[0][:ref_audio_len].unsqueeze(0),
                                 text=infer_text,
                                 duration=ref_audio_len * 2,
