@@ -110,7 +110,7 @@ class VQEmbedding(nn.Module):
 
         encoding_indices = torch.argmax(gumbel_weights, dim=-1)
         
-        if self.training:
+        if not hard:
             self.codebook_usage.scatter_add_(0, encoding_indices, torch.ones_like(encoding_indices, dtype=torch.float32))
 
         return z_q, None, encoding_indices
