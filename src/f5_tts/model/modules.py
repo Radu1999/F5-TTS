@@ -106,12 +106,17 @@ class VQEmbedding(nn.Module):
 
         z_flattened = self.layer_norm(z_flattened)
         logits = self.classifier(z_flattened)
+        print("Max logit value across batch:", logits.max().item())
+
+        
         logits = torch.clamp(logits, min=-10, max=10)
 
         gumbel_weights = F.gumbel_softmax(logits, tau=self.temperature, hard=True, dim=-1)
 
-        z_q = torch.matmul(gumbel_weights, self.embedding.weight).reshape(b, n, d)
+        print("Max gumbel weight value across batch:", gumbel_weights.max().item())
 
+        z_q = torch.matmul(gumbel_weights, self.embedding.weight).reshape(b, n, d)
+        print("Max z_q value across batch:", z_q.max().item())
         encoding_indices = torch.argmax(gumbel_weights, dim=-1)
 
         return z_q, None, encoding_indices
