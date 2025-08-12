@@ -106,6 +106,7 @@ class VQEmbedding(nn.Module):
 
         z_flattened = self.layer_norm(z_flattened)
         logits = self.classifier(z_flattened)
+        logits = torch.clamp(logits, min=-10, max=10)
 
         gumbel_weights = F.gumbel_softmax(logits, tau=self.temperature, hard=True, dim=-1)
 
