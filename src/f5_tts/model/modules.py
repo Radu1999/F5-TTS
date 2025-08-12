@@ -87,7 +87,7 @@ class VQEmbedding(nn.Module):
         self.anneal_rate = anneal_rate
 
         self.classifier = nn.Linear(embedding_dim, embedding.weight.shape[0])
-        self.layer_norm = nn.LayerNorm(self.embedding_dim)
+        self.layer_norm = nn.LayerNorm(embedding_dim)
 
         if embedding is None:
             self.embedding_dim = embedding_dim
