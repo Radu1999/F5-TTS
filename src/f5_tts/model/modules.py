@@ -87,6 +87,7 @@ class VQEmbedding(nn.Module):
         self.anneal_rate = anneal_rate
 
         self.classifier = nn.Linear(embedding_dim, embedding.weight.shape[0])
+        self.layer_norm = nn.LayerNorm(self.embedding_dim)
 
         if embedding is None:
             self.embedding_dim = embedding_dim
@@ -102,8 +103,9 @@ class VQEmbedding(nn.Module):
         b, n, d = z.shape
         assert d == self.embedding_dim, f"Input channel {d} does not match embedding dim {self.embedding_dim}"
         z_flattened = z.reshape(b * n, d)
-        logits = self.classifier(z_flattened)
 
+        z_flattened = self.layer_norm(z_flattened)
+        logits = self.classifier(z_flattened)
 
         gumbel_weights = F.gumbel_softmax(logits, tau=self.temperature, hard=True, dim=-1)
 
