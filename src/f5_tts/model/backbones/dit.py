@@ -73,6 +73,10 @@ class LanguageModule(nn.Module):
         self.vq_layer = VQEmbedding(embedding=text_embed, embedding_dim=text_embed.weight.shape[1]).to('cuda')
         self.codebook = text_embed
 
+    def log_codebook_usage(self, logger, step):
+        if self.vq_layer is not None:
+            logger.log_codebook_usage(self.vq_layer.codebook_usage, step)
+
 
 class TextEmbedding(nn.Module):
     def __init__(self, text_num_embeds, text_dim, mask_padding=True, conv_layers=0, conv_mult=2):

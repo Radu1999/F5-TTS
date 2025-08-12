@@ -86,6 +86,7 @@ class VQEmbedding(nn.Module):
         self.temperature_min = temperature_min
         self.anneal_rate = anneal_rate
 
+        self.register_buffer('codebook_usage', torch.zeros(num_embeddings))
         self.classifier = nn.Linear(embedding_dim, embedding.weight.shape[0])
 
         if embedding is None:
@@ -108,6 +109,9 @@ class VQEmbedding(nn.Module):
         z_q = torch.matmul(gumbel_weights, self.embedding.weight).reshape(b, n, d)
 
         encoding_indices = torch.argmax(gumbel_weights, dim=-1)
+        
+        if self.training:
+            self.codebook_usage.scatter_add_(0, encoding_indices, torch.ones_like(encoding_indices, dtype=torch.float32))
 
         return z_q, None, encoding_indices
 
