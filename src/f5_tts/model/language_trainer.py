@@ -47,6 +47,7 @@ class Trainer:
         wandb_run_name="test_run",
         wandb_resume_id: str = None,
         log_samples: bool = False,
+        log_gradients: bool = True,
         last_per_updates=None,
         accelerate_kwargs: dict = dict(),
         ema_kwargs: dict = dict(),
@@ -61,6 +62,7 @@ class Trainer:
         if logger == "wandb" and not wandb.api.api_key:
             logger = None
         self.log_samples = log_samples
+        self.log_gradients = log_gradients
 
         self.accelerator = Accelerator(
             log_with=logger if logger == "wandb" else None,
@@ -397,6 +399,14 @@ class Trainer:
                 if self.accelerator.sync_gradients:
                     if self.is_main:
                         self.ema_model.update()
+
+                    if self.log_gradients and self.accelerator.is_local_main_process:
+                        total_grad_norm = 0.0
+                        for p in self.language_module.parameters():
+                            if p.grad is not None:
+                                total_grad_norm += p.grad.detach().data.norm(2).item() ** 2
+                        total_grad_norm = total_grad_norm**0.5
+                        self.accelerator.log({"train/total_grad_norm": total_grad_norm}, step=global_update)
 
                     global_update += 1
                     progress_bar.update(1)
