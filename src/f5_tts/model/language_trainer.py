@@ -260,8 +260,13 @@ class Trainer:
 
     def log_codebook_usage(self, codebook_usage, step):
         if self.logger == "wandb":
+            total_usage = torch.sum(codebook_usage)
+            if total_usage > 0:
+                normalized_usage = codebook_usage / total_usage
+            else:
+                normalized_usage = codebook_usage
             self.accelerator.log(
-                {"codebook_usage": wandb.Histogram(codebook_usage.cpu().numpy())},
+                {"codebook_usage": wandb.Histogram(normalized_usage.cpu().numpy())},
                 step=step
             )
 
