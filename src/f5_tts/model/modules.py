@@ -76,12 +76,12 @@ def get_bigvgan_mel_spectrogram(
 
 class VQEmbedding(nn.Module):
     def __init__(self, embedding_dim=128, commitment_cost=1.0, num_embeddings=2548,
-                 embedding: nn.Embedding = None, temperature=2.0, hard=False,
+                 embedding: nn.Embedding = None, temperature=0.9,
                  temperature_min=0.5, anneal_rate=0.999):
         super().__init__()
         self.commitment_cost = commitment_cost
         self.temperature = temperature
-        self.hard = hard
+
 
         self.temperature_min = temperature_min
         self.anneal_rate = anneal_rate
@@ -98,36 +98,18 @@ class VQEmbedding(nn.Module):
             self.embedding_dim = self.embedding.weight.shape[1]
             self.num_embeddings = self.embedding.weight.shape[0]
 
-    def forward(self, z):
-        # Anneal temperature
-        self.temperature = max(self.temperature * self.anneal_rate, self.temperature_min)
-
+    def forward(self, z, hard=False):
         b, n, d = z.shape
         assert d == self.embedding_dim, f"Input channel {d} does not match embedding dim {self.embedding_dim}"
         z_flattened = z.reshape(b * n, d)
         logits = self.classifier(z_flattened)
-        gumbel_weights = F.gumbel_softmax(logits, tau=self.temperature, hard=self.hard, dim=-1)
+        gumbel_weights = F.gumbel_softmax(logits, tau=self.temperature, hard=hard, dim=-1)
 
         z_q = torch.matmul(gumbel_weights, self.embedding.weight).reshape(b, n, d)
 
         encoding_indices = torch.argmax(gumbel_weights, dim=-1)
 
         return z_q, None, encoding_indices
-
-    def inference(self, z):
-        b, n, d = z.shape
-        assert d == self.embedding_dim, f"Input channel {d} != {self.embedding_dim}"
-
-        z_flattened = z.reshape(b * n, d)
-        logits = self.classifier(z_flattened)
-
-        # Directly pick the argmax embedding index
-        indices = torch.argmax(logits, dim=-1)
-
-        # Get embeddings from the codebook
-        z_q = self.embedding(indices).reshape(b, n, d)
-
-        return z_q, None, indices
 
 
 # class VQEmbedding(nn.Module):

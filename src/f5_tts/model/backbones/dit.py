@@ -63,7 +63,7 @@ class LanguageModule(nn.Module):
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
         if inference:
-            z_q, loss, encoding_indices = self.vq_layer.inference(text)
+            z_q, loss, encoding_indices = self.vq_layer(text, hard=True)
         else:
             z_q, loss, encoding_indices = self.vq_layer(text)
 
