@@ -112,9 +112,7 @@ class VQEmbedding(nn.Module):
 
         encoding_indices = torch.argmax(gumbel_weights, dim=-1)
 
-        loss = self.commitment_cost * F.mse_loss(z, z_q.detach())
-
-        return z_q, loss, encoding_indices
+        return z_q, None, encoding_indices
 
     def inference(self, z):
         b, n, d = z.shape

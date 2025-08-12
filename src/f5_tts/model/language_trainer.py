@@ -376,12 +376,16 @@ class Trainer:
                         self.accelerator.log({"duration loss": dur_loss.item()}, step=global_update)
 
                     text_embed, loss_vq = self.language_module(text=text_inputs, seq_len=mel_spec.shape[1])
-                    self.accelerator.log({"vq_loss": loss_vq.item()}, step=global_update)
+
                     loss, cond, pred = self.model(
                         mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler, text_embed=text_embed,
                     )
 
-                    self.accelerator.backward(loss + loss_vq)
+                    if loss_vq is not None:
+                        self.accelerator.log({"vq_loss": loss_vq.item()}, step=global_update)
+                        self.accelerator.backward(loss + loss_vq)
+                    else:
+                        self.accelerator.backward(loss)
 
                     if self.max_grad_norm > 0 and self.accelerator.sync_gradients:
                         self.accelerator.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
