@@ -85,8 +85,15 @@ class VQEmbedding(nn.Module):
         self.temperature_min = temperature_min
         self.anneal_rate = anneal_rate
 
-        self.classifier = nn.Linear(embedding_dim, embedding.weight.shape[0])
-        self.layer_norm = nn.LayerNorm(embedding_dim)
+        self.classifier = nn.Sequential(
+            nn.Linear(embedding_dim, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 2048),
+            nn.ReLU(),
+            nn.Linear(2048, embedding.weight.shape[0])
+        )
+
+        self.max_alpha = 1.0
 
         if embedding is None:
             self.embedding_dim = embedding_dim
@@ -102,18 +109,15 @@ class VQEmbedding(nn.Module):
         b, n, d = z.shape
         assert d == self.embedding_dim, f"Input channel {d} does not match embedding dim {self.embedding_dim}"
         z_flattened = z.reshape(b * n, d)
-
-        z_flattened = self.layer_norm(z_flattened)
         logits = self.classifier(z_flattened)
-        logits = torch.clamp(logits, min=-10, max=10)
         gumbel_weights = F.gumbel_softmax(logits, tau=self.temperature, hard=True, dim=-1)
 
         z_q = torch.matmul(gumbel_weights, self.embedding.weight).reshape(b, n, d)
         if not hard:
-            z_q = (z_q + z) / 2
+            self.max_alpha = self.max_alpha * self.anneal_rate
+            z_q = (1 - self.max_alpha) * z_q + self.max_alpha * z
 
         encoding_indices = torch.argmax(gumbel_weights, dim=-1)
-
         return z_q, None, encoding_indices
 
 
