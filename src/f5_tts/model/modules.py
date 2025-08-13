@@ -114,8 +114,8 @@ class VQEmbedding(nn.Module):
 
         z_q = torch.matmul(gumbel_weights, self.embedding.weight).reshape(b, n, d)
         if not hard:
-            self.max_alpha = self.max_alpha * self.anneal_rate
-            z_q = (1 - self.max_alpha) * z_q + self.max_alpha * z
+            mask = (torch.rand_like(z_q[..., 0]) < 0.6).unsqueeze(-1).expand_as(z_q)  # shape: (b, n, d)
+            z_q = torch.where(mask, z, z_q)
 
         encoding_indices = torch.argmax(gumbel_weights, dim=-1)
         return z_q, None, encoding_indices
