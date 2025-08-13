@@ -124,7 +124,7 @@ def get_bigvgan_mel_spectrogram(
 class VQEmbedding(nn.Module):
     def __init__(self, embedding_dim=128, num_embeddings=2548, embedding: nn.Embedding = None, commitment=0.25):
         super().__init__()
-
+        self.commitment = commitment
         if not embedding:
             self.embedding_dim = embedding_dim
             self.num_embeddings = num_embeddings
@@ -162,7 +162,7 @@ class VQEmbedding(nn.Module):
 
         # Straight-through estimator trick for gradient backpropagation
         z_q = z + (z_q - z).detach()
-        commitment_loss = F.mse_loss(z, z_q) * commitment
+        commitment_loss = F.mse_loss(z, z_q) * self.commitment
 
         return z_q, commitment_loss, encoding_indices
 
