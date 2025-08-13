@@ -26,36 +26,37 @@ from f5_tts.model.backbones.dit import LanguageModule
 
 class Trainer:
     def __init__(
-        self,
-        model: CFM,
-        epochs,
-        learning_rate,
-        num_warmup_updates=20000,
-        language_module: LanguageModule=None,
-        save_per_updates=1000,
-        keep_last_n_checkpoints: int = -1,  # -1 to keep all, 0 to not save intermediate, > 0 to keep last N checkpoints
-        checkpoint_path=None,
-        batch_size_per_gpu=32,
-        batch_size_type: str = "sample",
-        max_samples=32,
-        grad_accumulation_steps=1,
-        max_grad_norm=1.0,
-        noise_scheduler: str | None = None,
-        duration_predictor: torch.nn.Module | None = None,
-        logger: str | None = "wandb",  # "wandb" | "tensorboard" | None
-        wandb_project="test_f5-tts",
-        wandb_run_name="test_run",
-        wandb_resume_id: str = None,
-        log_samples: bool = False,
-        log_gradients: bool = True,
-        last_per_updates=None,
-        accelerate_kwargs: dict = dict(),
-        ema_kwargs: dict = dict(),
-        bnb_optimizer: bool = False,
-        mel_spec_type: str = "vocos",  # "vocos" | "bigvgan"
-        is_local_vocoder: bool = False,  # use local path vocoder
-        local_vocoder_path: str = "",  # local vocoder path
-        model_cfg_dict: dict = dict(),  # training config
+            self,
+            model: CFM,
+            epochs,
+            learning_rate,
+            num_warmup_updates=20000,
+            language_module: LanguageModule = None,
+            save_per_updates=1000,
+            keep_last_n_checkpoints: int = -1,
+            # -1 to keep all, 0 to not save intermediate, > 0 to keep last N checkpoints
+            checkpoint_path=None,
+            batch_size_per_gpu=32,
+            batch_size_type: str = "sample",
+            max_samples=32,
+            grad_accumulation_steps=1,
+            max_grad_norm=1.0,
+            noise_scheduler: str | None = None,
+            duration_predictor: torch.nn.Module | None = None,
+            logger: str | None = "wandb",  # "wandb" | "tensorboard" | None
+            wandb_project="test_f5-tts",
+            wandb_run_name="test_run",
+            wandb_resume_id: str = None,
+            log_samples: bool = False,
+            log_gradients: bool = True,
+            last_per_updates=None,
+            accelerate_kwargs: dict = dict(),
+            ema_kwargs: dict = dict(),
+            bnb_optimizer: bool = False,
+            mel_spec_type: str = "vocos",  # "vocos" | "bigvgan"
+            is_local_vocoder: bool = False,  # use local path vocoder
+            local_vocoder_path: str = "",  # local vocoder path
+            model_cfg_dict: dict = dict(),  # training config
     ):
         ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
 
@@ -145,7 +146,6 @@ class Trainer:
             self.optimizer = AdamW(language_module.parameters(), lr=learning_rate)
         self.language_module, self.optimizer = self.accelerator.prepare(self.language_module, self.optimizer)
 
-
     @property
     def is_main(self):
         return self.accelerator.is_main_process
@@ -174,9 +174,9 @@ class Trainer:
                         f
                         for f in os.listdir(self.checkpoint_path)
                         if f.startswith("model_")
-                        and not f.startswith("pretrained_")  # Exclude pretrained models
-                        and f.endswith(".pt")
-                        and f != "model_last.pt"
+                           and not f.startswith("pretrained_")  # Exclude pretrained models
+                           and f.endswith(".pt")
+                           and f != "model_last.pt"
                     ]
                     checkpoints.sort(key=lambda x: int(x.split("_")[1].split(".")[0]))
                     while len(checkpoints) > self.keep_last_n_checkpoints:
@@ -186,9 +186,9 @@ class Trainer:
 
     def load_checkpoint(self):
         if (
-            not exists(self.checkpoint_path)
-            or not os.path.exists(self.checkpoint_path)
-            or not any(filename.endswith((".pt", ".safetensors")) for filename in os.listdir(self.checkpoint_path))
+                not exists(self.checkpoint_path)
+                or not os.path.exists(self.checkpoint_path)
+                or not any(filename.endswith((".pt", ".safetensors")) for filename in os.listdir(self.checkpoint_path))
         ):
             return 0
 
@@ -198,7 +198,7 @@ class Trainer:
             for f in os.listdir(self.checkpoint_path)
             if (f.startswith("model_") or f.startswith("pretrained_")) and f.endswith((".pt", ".safetensors"))
         ]
-        
+
         pretrained_checkpoint_files = [f for f in all_checkpoints if f.startswith("pretrained_")]
         if not pretrained_checkpoint_files:
             print("F5-TTS WARNING: No pretrained model found. The main model will not be loaded.")
@@ -210,14 +210,15 @@ class Trainer:
 
                 checkpoint = load_file(f"{self.checkpoint_path}/{pretrained_checkpoint}", device="cpu")
                 checkpoint = {"ema_model_state_dict": checkpoint}
-            else: # .pt
-                checkpoint = torch.load(f"{self.checkpoint_path}/{pretrained_checkpoint}", weights_only=True, map_location="cpu")
-            
+            else:  # .pt
+                checkpoint = torch.load(f"{self.checkpoint_path}/{pretrained_checkpoint}", weights_only=True,
+                                        map_location="cpu")
+
             # patch for backward compatibility, 305e3ea
             for key in ["ema_model.mel_spec.mel_stft.mel_scale.fb", "ema_model.mel_spec.mel_stft.spectrogram.window"]:
                 if key in checkpoint["ema_model_state_dict"]:
                     del checkpoint["ema_model_state_dict"][key]
-            
+
             if self.is_main:
                 self.ema_model.load_state_dict(checkpoint["ema_model_state_dict"])
 
@@ -244,12 +245,14 @@ class Trainer:
                 )[-1]
             else:
                 latest_checkpoint = None
-        
+
         if latest_checkpoint:
             print(f"Resuming language_module training from {latest_checkpoint}")
-            checkpoint = torch.load(f"{self.checkpoint_path}/{latest_checkpoint}", weights_only=True, map_location="cpu")
-            
-            self.accelerator.unwrap_model(self.language_module).load_state_dict(checkpoint["language_module_state_dict"])
+            checkpoint = torch.load(f"{self.checkpoint_path}/{latest_checkpoint}", weights_only=True,
+                                    map_location="cpu")
+
+            self.accelerator.unwrap_model(self.language_module).load_state_dict(
+                checkpoint["language_module_state_dict"])
             self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
             if self.scheduler:
                 self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
@@ -260,7 +263,8 @@ class Trainer:
 
         return update
 
-    def train(self, train_dataset: Dataset, num_workers=16, resumable_with_seed: int = None, sanity_check: bool = False):
+    def train(self, train_dataset: Dataset, num_workers=16, resumable_with_seed: int = None,
+              sanity_check: bool = False):
         if sanity_check:
             num_workers = 0
             pin_memory = False
@@ -318,7 +322,7 @@ class Trainer:
         #  accelerator.prepare() dispatches batches to devices;
         #  which means the length of dataloader calculated before, should consider the number of devices
         warmup_updates = (
-            self.num_warmup_updates * self.accelerator.num_processes
+                self.num_warmup_updates * self.accelerator.num_processes
         )  # consider a fixed warmup steps while using accelerate multi-gpu ddp
         # otherwise by default with split_batches=False, warmup steps change with num_processes
         total_updates = math.ceil(len(train_dataloader) / self.grad_accumulation_steps) * self.epochs
@@ -379,7 +383,8 @@ class Trainer:
 
                     text_embed, loss_vq = self.language_module(text=text_inputs, seq_len=mel_spec.shape[1])
                     loss, cond, pred = self.model(
-                        mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler, text_embed=text_embed,
+                        mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler,
+                        text_embed=text_embed,
                     )
 
                     if loss_vq is not None:
@@ -387,6 +392,14 @@ class Trainer:
                         self.accelerator.backward(loss + loss_vq)
                     else:
                         self.accelerator.backward(loss)
+
+                    if self.log_gradients and self.accelerator.is_local_main_process and self.accelerator.sync_gradients:
+                        total_grad_norm = 0.0
+                        for p in self.language_module.parameters():
+                            if p.grad is not None:
+                                total_grad_norm += p.grad.detach().data.norm(2).item() ** 2
+                        total_grad_norm = total_grad_norm ** 0.5
+                        self.accelerator.log({"train/total_grad_norm": total_grad_norm}, step=global_update)
 
                     if self.max_grad_norm > 0 and self.accelerator.sync_gradients:
                         self.accelerator.clip_grad_norm_(self.language_module.parameters(), self.max_grad_norm)
@@ -398,14 +411,6 @@ class Trainer:
                 if self.accelerator.sync_gradients:
                     if self.is_main:
                         self.ema_model.update()
-
-                    if self.log_gradients and self.accelerator.is_local_main_process:
-                        total_grad_norm = 0.0
-                        for p in self.language_module.parameters():
-                            if p.grad is not None:
-                                total_grad_norm += p.grad.detach().data.norm(2).item() ** 2
-                        total_grad_norm = total_grad_norm**0.5
-                        self.accelerator.log({"train/total_grad_norm": total_grad_norm}, step=global_update)
 
                     global_update += 1
                     progress_bar.update(1)

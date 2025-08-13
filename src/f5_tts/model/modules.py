@@ -74,57 +74,28 @@ def get_bigvgan_mel_spectrogram(
     return mel_spec
 
 
-class VQEmbedding(nn.Module):
-    def __init__(self, embedding_dim=128, commitment_cost=1.0, num_embeddings=2548,
-                 embedding: nn.Embedding = None, temperature=0.9,
-                 temperature_min=0.5, anneal_rate=0.999):
-        super().__init__()
-        self.commitment_cost = commitment_cost
-        self.temperature = temperature
-
-        self.temperature_min = temperature_min
-        self.anneal_rate = anneal_rate
-
-        self.classifier = nn.Sequential(
-            nn.Linear(embedding_dim, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, 2048),
-            nn.ReLU(),
-            nn.Linear(2048, embedding.weight.shape[0])
-        )
-
-        self.max_alpha = 1.0
-
-        if embedding is None:
-            self.embedding_dim = embedding_dim
-            self.num_embeddings = num_embeddings
-            self.embedding = nn.Embedding(num_embeddings, embedding_dim)
-            self.embedding.weight.data.uniform_(-1 / self.num_embeddings, 1 / self.num_embeddings)
-        else:
-            self.embedding = embedding
-            self.embedding_dim = self.embedding.weight.shape[1]
-            self.num_embeddings = self.embedding.weight.shape[0]
-
-    def forward(self, z, hard=True):
-        b, n, d = z.shape
-        assert d == self.embedding_dim, f"Input channel {d} does not match embedding dim {self.embedding_dim}"
-        z_flattened = z.reshape(b * n, d)
-        logits = self.classifier(z_flattened)
-        gumbel_weights = F.gumbel_softmax(logits, tau=self.temperature, hard=True, dim=-1)
-
-        z_q = torch.matmul(gumbel_weights, self.embedding.weight).reshape(b, n, d)
-        if not hard:
-            self.max_alpha = self.max_alpha * self.anneal_rate
-            z_q = (1 - self.max_alpha) * z_q + self.max_alpha * z
-
-        encoding_indices = torch.argmax(gumbel_weights, dim=-1)
-        return z_q, None, encoding_indices
-
-
 # class VQEmbedding(nn.Module):
-#     def __init__(self, embedding_dim=128, num_embeddings=2548, embedding: nn.Embedding = None):
+#     def __init__(self, embedding_dim=128, commitment_cost=1.0, num_embeddings=2548,
+#                  embedding: nn.Embedding = None, temperature=0.9,
+#                  temperature_min=0.5, anneal_rate=0.999):
 #         super().__init__()
-#         if not embedding:
+#         self.commitment_cost = commitment_cost
+#         self.temperature = temperature
+#
+#         self.temperature_min = temperature_min
+#         self.anneal_rate = anneal_rate
+#
+#         self.classifier = nn.Sequential(
+#             nn.Linear(embedding_dim, 1024),
+#             nn.ReLU(),
+#             nn.Linear(1024, 2048),
+#             nn.ReLU(),
+#             nn.Linear(2048, embedding.weight.shape[0])
+#         )
+#
+#         self.max_alpha = 1.0
+#
+#         if embedding is None:
 #             self.embedding_dim = embedding_dim
 #             self.num_embeddings = num_embeddings
 #             self.embedding = nn.Embedding(num_embeddings, embedding_dim)
@@ -134,38 +105,65 @@ class VQEmbedding(nn.Module):
 #             self.embedding_dim = self.embedding.weight.shape[1]
 #             self.num_embeddings = self.embedding.weight.shape[0]
 #
-#     def forward(self, z, hard=False):
-#         # z: (b, n, d)
+#     def forward(self, z, hard=True):
 #         b, n, d = z.shape
 #         assert d == self.embedding_dim, f"Input channel {d} does not match embedding dim {self.embedding_dim}"
 #         z_flattened = z.reshape(b * n, d)
+#         logits = self.classifier(z_flattened)
+#         gumbel_weights = F.gumbel_softmax(logits, tau=self.temperature, hard=True, dim=-1)
 #
-#         # Calculate distances between z and the codebook embeddings |a-b|²
-#         distances = (
-#             torch.sum(z_flattened**2, dim=-1, keepdim=True)  # a²
-#             + torch.sum(self.embedding.weight.t() ** 2, dim=0, keepdim=True)  # b²
-#             - 2 * torch.matmul(z_flattened, self.embedding.weight.t())  # -2ab
-#         )
+#         z_q = torch.matmul(gumbel_weights, self.embedding.weight).reshape(b, n, d)
+#         if not hard:
+#             self.max_alpha = self.max_alpha * self.anneal_rate
+#             z_q = (1 - self.max_alpha) * z_q + self.max_alpha * z
 #
-#         # Get the index with the smallest distance
-#         encoding_indices = torch.argmin(distances, dim=-1)
-#
-#         # Get the quantized vector
-#         z_q = self.embedding(encoding_indices)
-#         z_q = z_q.reshape(b, n, d)
-#
-#         # Calculate the loss
-#         loss = F.mse_loss(z, z_q)
-#         print(z.requires_grad)
-#         print(z_q.requires_grad)
-#         print('LOOOSSSS')
-#         print(loss.requires_grad)
-#
-#         # Straight-through estimator trick for gradient backpropagation
-#         z_q = z + (z_q - z).detach()
-#         print(z_q.requires_grad)
-#
-#         return z_q, loss, encoding_indices
+#         encoding_indices = torch.argmax(gumbel_weights, dim=-1)
+#         return z_q, None, encoding_indices
+
+
+class VQEmbedding(nn.Module):
+    def __init__(self, embedding_dim=128, num_embeddings=2548, embedding: nn.Embedding = None):
+        super().__init__()
+
+        if not embedding:
+            self.embedding_dim = embedding_dim
+            self.num_embeddings = num_embeddings
+            self.embedding = nn.Embedding(num_embeddings, embedding_dim)
+            self.embedding.weight.data.uniform_(-1 / self.num_embeddings, 1 / self.num_embeddings)
+        else:
+            self.embedding = embedding
+            self.embedding_dim = self.embedding.weight.shape[1]
+            self.num_embeddings = self.embedding.weight.shape[0]
+
+    def forward(self, z, hard=False):
+        # z: (b, n, d)
+        b, n, d = z.shape
+        assert d == self.embedding_dim, f"Input channel {d} does not match embedding dim {self.embedding_dim}"
+        z_flattened = z.reshape(b * n, d)
+
+        # Calculate distances between z and the codebook embeddings |a-b|²
+        distances = (
+                torch.sum(z_flattened ** 2, dim=-1, keepdim=True)  # a²
+                + torch.sum(self.embedding.weight.t() ** 2, dim=0, keepdim=True)  # b²
+                - 2 * torch.matmul(z_flattened, self.embedding.weight.t())  # -2ab
+        )
+
+        # Get the index with the smallest distance
+        encoding_indices = torch.argmin(distances, dim=-1)
+
+        # Get the quantized vector
+        z_q = self.embedding(encoding_indices)
+        z_q = z_q.reshape(b, n, d)
+
+        if hard is False:
+            # Combine z_q and z using a random mask (mask 50% of z_q, rest from z)
+            mask = (torch.rand_like(z_q[..., 0]) < 0.5).unsqueeze(-1).expand_as(z_q)  # shape: (b, n, d)
+            z_q = torch.where(mask, z, z_q)
+
+        # Straight-through estimator trick for gradient backpropagation
+        z_q = z + (z_q - z).detach()
+
+        return z_q, None, encoding_indices
 
 
 def get_vocos_mel_spectrogram(
