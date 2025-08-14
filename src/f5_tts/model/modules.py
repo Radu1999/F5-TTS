@@ -85,10 +85,6 @@ class VQEmbedding(nn.Module):
         self.temperature_min = temperature_min
         self.anneal_rate = anneal_rate
 
-        self.processor = nn.Sequential(
-            *[ConvNeXtV2Block(embedding_dim, embedding_dim * 2) for _ in range(2)]
-        )
-
         self.classifier = nn.Sequential(
             nn.Linear(embedding_dim, 1024),
             nn.ReLU(),
@@ -113,23 +109,21 @@ class VQEmbedding(nn.Module):
         b, n, d = z.shape
         assert d == self.embedding_dim, f"Input channel {d} does not match embedding dim {self.embedding_dim}"
 
-        z1 = z
-        for block in self.processor:
-            z1 = block(z1)
-            z1 = z1.masked_fill(text_mask, 0.0)
-
-        z_flattened = z1.reshape(b * n, d)
+        z_flattened = z.reshape(b * n, d)
         logits = self.classifier(z_flattened)
-        gumbel_weights = F.gumbel_softmax(logits, tau=self.temperature, hard=True, dim=-1)
+        gumbel_weights_hard = F.gumbel_softmax(logits, tau=self.temperature, hard=True, dim=-1)
+        gumbel_weights_soft = F.gumbel_softmax(logits, tau=self.temperature, hard=False, dim=-1)
 
-        z_q = torch.matmul(gumbel_weights, self.embedding.weight).reshape(b, n, d)
-        z_q.masked_fill(text_mask, 0.0)
+        z_q_hard = torch.matmul(gumbel_weights_hard, self.embedding.weight).reshape(b, n, d)
+        z_q_soft = torch.matmul(gumbel_weights_soft, self.embedding.weight).reshape(b, n, d)
 
         if not hard:
-            mask = (torch.rand_like(z_q[..., 0]) < 0.6).unsqueeze(-1).expand_as(z_q)  # shape: (b, n, d)
-            z_q = torch.where(mask, z_q, z)
+            mask = (torch.rand_like(z[..., 0]) < 0.4).unsqueeze(-1).expand_as(z)  # shape: (b, n, d)
+            z_q = torch.where(mask, z_q_soft, z_q_hard)
+        else:
+            z_q = z_q_hard
 
-        encoding_indices = torch.argmax(gumbel_weights, dim=-1)
+        encoding_indices = torch.argmax(gumbel_weights_hard, dim=-1)
         return z_q, None, encoding_indices
 
 
