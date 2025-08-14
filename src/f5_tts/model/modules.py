@@ -76,7 +76,7 @@ def get_bigvgan_mel_spectrogram(
 
 class VQEmbedding(nn.Module):
     def __init__(self, embedding_dim=128, commitment_cost=1.0, num_embeddings=2548,
-                 embedding: nn.Embedding = None, temperature=10,
+                 embedding: nn.Embedding = None, temperature=5,
                  temperature_min=1.0, anneal_rate=0.999):
         super().__init__()
         self.commitment_cost = commitment_cost
@@ -117,17 +117,20 @@ class VQEmbedding(nn.Module):
         gumbel_weights_hard = F.gumbel_softmax(logits, tau=self.temperature if not hard else 0, hard=True, dim=-1)
         gumbel_weights_soft = F.gumbel_softmax(logits, tau=self.temperature, hard=False, dim=-1)
 
-        z_q_hard = torch.matmul(gumbel_weights_hard, self.embedding.weight).reshape(b, n, d)
-        z_q_soft = torch.matmul(gumbel_weights_soft, self.embedding.weight).reshape(b, n, d)
-
         if not hard:
             mask = (torch.rand_like(z[..., 0]) < 0.4).unsqueeze(-1).expand_as(z)  # shape: (b, n, d)
-            z_q = torch.where(mask, z_q_soft, z_q_hard)
+            weights = torch.where(mask, gumbel_weights_soft, gumbel_weights_hard)
+            z_q = torch.matmul(weights, self.embedding.weight).reshape(b, n, d)
+
+            # KL loss to push to uniform
+            avg_probs = torch.mean(weights, dim=0)
+            kl_loss = (avg_probs * torch.log(avg_probs + 1e-8)).sum() * self.commitment_cost
+
         else:
-            z_q = z_q_hard
+            z_q = torch.matmul(gumbel_weights_hard, self.embedding.weight).reshape(b, n, d)
 
         encoding_indices = torch.argmax(gumbel_weights_hard, dim=-1)
-        return z_q, None, encoding_indices
+        return z_q, kl_loss, encoding_indices
 
 
 # class VQEmbedding(nn.Module):
