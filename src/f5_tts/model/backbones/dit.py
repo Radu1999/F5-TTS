@@ -64,7 +64,7 @@ class LanguageModule(nn.Module):
 
         z_q, loss, encoding_indices = self.vq_layer(text, hard=inference, text_mask=text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)))
 
-        return z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0), loss
+        return z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0), loss, encoding_indices
 
     def build_vq(self, text_embed: nn.Embedding):
         self.vq_layer = VQEmbedding(embedding=text_embed, embedding_dim=text_embed.weight.shape[1]).to('cuda')

@@ -351,6 +351,7 @@ class Trainer:
         for epoch in range(skipped_epoch, self.epochs):
             print('STARTED EPCH')
             self.model.train()
+            all_encoding_indices = []
             if exists(resumable_with_seed) and epoch == skipped_epoch:
                 progress_bar_initial = math.ceil(skipped_batch / self.grad_accumulation_steps)
                 current_dataloader = skipped_dataloader
@@ -381,7 +382,11 @@ class Trainer:
                         dur_loss = self.duration_predictor(mel_spec, lens=batch.get("durations"))
                         self.accelerator.log({"duration loss": dur_loss.item()}, step=global_update)
 
-                    text_embed, loss_vq = self.language_module(text=text_inputs, seq_len=mel_spec.shape[1])
+                    text_embed, loss_vq, encoding_indices = self.language_module(text=text_inputs, seq_len=mel_spec.shape[1])
+
+                    if encoding_indices is not None:
+                        all_encoding_indices.append(encoding_indices.detach())
+
                     loss, cond, pred = self.model(
                         mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler,
                         text_embed=text_embed,
@@ -495,6 +500,22 @@ class Trainer:
                             f"{log_samples_path}/update_{global_update}_ref.wav", ref_audio, target_sample_rate
                         )
                         self.model.train()
+            self.accelerator.wait_for_everyone()
+            if len(all_encoding_indices) > 0:
+                indices_this_process = torch.cat([idx.flatten() for idx in all_encoding_indices])
+                gathered_indices = self.accelerator.gather(indices_this_process)
+                if self.accelerator.is_local_main_process:
+                    if self.logger == "wandb":
+                        self.accelerator.log(
+                            {"encoding_indices_distribution": wandb.Histogram(gathered_indices.cpu().numpy())},
+                            step=global_update,
+                        )
+                    elif self.logger == "tensorboard":
+                        self.writer.add_histogram(
+                            "encoding_indices_distribution",
+                            gathered_indices.cpu(),
+                            global_update,
+                        )
             if sanity_check:
                 break
 
