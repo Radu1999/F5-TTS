@@ -22,6 +22,8 @@ from f5_tts.model.backbones.dit import LanguageModule
 
 import matplotlib.pyplot as plt
 
+import numpy as np
+
 
 # trainer
 
@@ -507,8 +509,17 @@ class Trainer:
                 indices_this_process = torch.cat([idx.flatten() for idx in all_encoding_indices])
                 gathered_indices = self.accelerator.gather(indices_this_process)
                 if self.accelerator.is_local_main_process:
+                    indices_np = gathered_indices.cpu().numpy()
+                    if np.isnan(indices_np).any():
+                        print("WARNING: NaN values detected in encoding indices at update", global_update)
+                        nan_count = np.isnan(indices_np).sum()
+                        print(f"Number of NaN values: {nan_count}")
+                        # Optionally, you can log this as well
+                        self.accelerator.log({"nan_encoding_indices_count": nan_count}, step=global_update)
+                        # Remove NaNs for plotting
+                        indices_np = indices_np[~np.isnan(indices_np)]
                     fig, ax = plt.subplots()
-                    ax.hist(gathered_indices.cpu().numpy(), bins='auto')
+                    ax.hist(indices_np, bins='auto')
                     ax.set_xlabel("Encoding index")
                     ax.set_ylabel("Frequency")
                     self.accelerator.log({"encoding_indices_distribution": wandb.Image(fig)}, step=global_update)
