@@ -114,11 +114,11 @@ class VQEmbedding(nn.Module):
 
         z_flattened = z.reshape(b * n, d)
         logits = self.classifier(z_flattened)
-        gumbel_weights_hard = F.gumbel_softmax(logits, tau=self.temperature if not hard else 0, hard=True, dim=-1)
+        gumbel_weights_hard = F.gumbel_softmax(logits, tau=self.temperature, hard=True, dim=-1)
         gumbel_weights_soft = F.gumbel_softmax(logits, tau=self.temperature, hard=False, dim=-1)
         kl_loss = None
         if not hard:
-            mask = (torch.rand_like(gumbel_weights_soft[..., 0]) < 0.4).unsqueeze(-1).expand_as(gumbel_weights_soft)  # shape: (b, n, d)
+            mask = (torch.rand_like(gumbel_weights_soft[..., 0]) < 0.4).unsqueeze(-1).expand_as(gumbel_weights_soft)
             weights = torch.where(mask, gumbel_weights_soft, gumbel_weights_hard)
             z_q = torch.matmul(weights, self.embedding.weight).reshape(b, n, d)
 
@@ -127,7 +127,8 @@ class VQEmbedding(nn.Module):
             kl_loss = (avg_probs * torch.log(avg_probs + 1e-8)).sum() * self.commitment_cost
 
         else:
-            z_q = torch.matmul(gumbel_weights_hard, self.embedding.weight).reshape(b, n, d)
+            z_q = torch.argmax(logits, dim=-1)
+            z_q = self.embedding(z_q).reshape(b, n, d)
 
         encoding_indices = torch.argmax(gumbel_weights_hard, dim=-1)
         return z_q, kl_loss, encoding_indices
