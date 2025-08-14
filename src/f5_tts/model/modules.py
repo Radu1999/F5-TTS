@@ -118,7 +118,7 @@ class VQEmbedding(nn.Module):
         gumbel_weights_soft = F.gumbel_softmax(logits, tau=self.temperature, hard=False, dim=-1)
         kl_loss = None
         if not hard:
-            mask = (torch.rand_like(gumbel_weights_soft[..., 0]) < 0.4).unsqueeze(-1).expand_as(z)  # shape: (b, n, d)
+            mask = (torch.rand_like(gumbel_weights_soft[..., 0]) < 0.4).unsqueeze(-1).expand_as(gumbel_weights_soft)  # shape: (b, n, d)
             weights = torch.where(mask, gumbel_weights_soft, gumbel_weights_hard)
             z_q = torch.matmul(weights, self.embedding.weight).reshape(b, n, d)
 
