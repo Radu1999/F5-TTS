@@ -289,11 +289,11 @@ class CFM(nn.Module):
 
         # transformer and cfg training with a drop rate
         drop_audio_cond = random() < self.audio_drop_prob  # p_drop in voicebox paper
-        if random() < self.cond_drop_prob:  # p_uncond in voicebox paper
-            drop_audio_cond = True
-            drop_text = True
-        else:
-            drop_text = False
+        # if random() < self.cond_drop_prob:  # p_uncond in voicebox paper
+        #     drop_audio_cond = True
+        #     drop_text = True
+        # else:
+        #     drop_text = False
 
         # apply mask will use more memory; might adjust batchsize or batchsampler long sequence threshold
         pred = self.transformer(
