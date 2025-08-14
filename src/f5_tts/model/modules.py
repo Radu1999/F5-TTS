@@ -116,7 +116,7 @@ class VQEmbedding(nn.Module):
         logits = self.classifier(z_flattened)
         gumbel_weights_hard = F.gumbel_softmax(logits, tau=self.temperature if not hard else 0, hard=True, dim=-1)
         gumbel_weights_soft = F.gumbel_softmax(logits, tau=self.temperature, hard=False, dim=-1)
-
+        kl_loss = None
         if not hard:
             mask = (torch.rand_like(z[..., 0]) < 0.4).unsqueeze(-1).expand_as(z)  # shape: (b, n, d)
             weights = torch.where(mask, gumbel_weights_soft, gumbel_weights_hard)
