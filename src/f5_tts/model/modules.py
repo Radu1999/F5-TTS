@@ -85,6 +85,10 @@ class VQEmbedding(nn.Module):
         self.temperature_min = temperature_min
         self.anneal_rate = anneal_rate
 
+        self.processor = nn.Sequential(
+            *[ConvNeXtV2Block(embedding_dim, embedding_dim * 2) for _ in range(2)]
+        )
+
         self.classifier = nn.Sequential(
             nn.Linear(embedding_dim, 1024),
             nn.ReLU(),
@@ -105,14 +109,22 @@ class VQEmbedding(nn.Module):
             self.embedding_dim = self.embedding.weight.shape[1]
             self.num_embeddings = self.embedding.weight.shape[0]
 
-    def forward(self, z, hard=True):
+    def forward(self, z, hard=True, text_mask=None):
         b, n, d = z.shape
         assert d == self.embedding_dim, f"Input channel {d} does not match embedding dim {self.embedding_dim}"
-        z_flattened = z.reshape(b * n, d)
+
+        z1 = z
+        for block in self.processor:
+            z1 = block(z1)
+            z1 = z1.masked_fill(text_mask, 0.0)
+
+        z_flattened = z1.reshape(b * n, d)
         logits = self.classifier(z_flattened)
         gumbel_weights = F.gumbel_softmax(logits, tau=self.temperature, hard=True, dim=-1)
 
         z_q = torch.matmul(gumbel_weights, self.embedding.weight).reshape(b, n, d)
+        z_q.masked_fill(text_mask, 0.0)
+
         if not hard:
             mask = (torch.rand_like(z_q[..., 0]) < 0.6).unsqueeze(-1).expand_as(z_q)  # shape: (b, n, d)
             z_q = torch.where(mask, z_q, z)
