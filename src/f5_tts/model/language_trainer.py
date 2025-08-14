@@ -507,7 +507,7 @@ class Trainer:
                 indices_this_process = torch.cat([idx.flatten() for idx in all_encoding_indices])
                 gathered_indices = self.accelerator.gather(indices_this_process)
                 if self.accelerator.is_local_main_process:
-                    ifig, ax = plt.subplots()
+                    fig, ax = plt.subplots()
                     ax.hist(gathered_indices.cpu().numpy(), bins='auto')
                     ax.set_xlabel("Encoding index")
                     ax.set_ylabel("Frequency")
