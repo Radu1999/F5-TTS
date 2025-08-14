@@ -76,8 +76,8 @@ def get_bigvgan_mel_spectrogram(
 
 class VQEmbedding(nn.Module):
     def __init__(self, embedding_dim=128, commitment_cost=1.0, num_embeddings=2548,
-                 embedding: nn.Embedding = None, temperature=3,
-                 temperature_min=0.5, anneal_rate=0.999):
+                 embedding: nn.Embedding = None, temperature=10,
+                 temperature_min=1.0, anneal_rate=0.999):
         super().__init__()
         self.commitment_cost = commitment_cost
         self.temperature = temperature
@@ -106,13 +106,16 @@ class VQEmbedding(nn.Module):
             self.num_embeddings = self.embedding.weight.shape[0]
 
     def forward(self, z, hard=True, text_mask=None):
+
+        self.temperature = max(self.temperature * self.anneal_rate, self.temperature_min)
+
         b, n, d = z.shape
         assert d == self.embedding_dim, f"Input channel {d} does not match embedding dim {self.embedding_dim}"
 
         z_flattened = z.reshape(b * n, d)
         logits = self.classifier(z_flattened)
         gumbel_weights_hard = F.gumbel_softmax(logits, tau=self.temperature if not hard else 0, hard=True, dim=-1)
-        gumbel_weights_soft = F.gumbel_softmaxgumbel_softmax(logits, tau=self.temperature, hard=False, dim=-1)
+        gumbel_weights_soft = F.gumbel_softmax(logits, tau=self.temperature, hard=False, dim=-1)
 
         z_q_hard = torch.matmul(gumbel_weights_hard, self.embedding.weight).reshape(b, n, d)
         z_q_soft = torch.matmul(gumbel_weights_soft, self.embedding.weight).reshape(b, n, d)
