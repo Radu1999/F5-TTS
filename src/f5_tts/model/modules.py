@@ -111,7 +111,7 @@ class VQEmbedding(nn.Module):
 
         z_flattened = z.reshape(b * n, d)
         logits = self.classifier(z_flattened)
-        gumbel_weights_hard = F.gumbel_softmax(logits, tau=self.temperature, hard=True, dim=-1)
+        gumbel_weights_hard = F.gumbel_softmax(logits, tau=self.temperature if not hard else 0, hard=True, dim=-1)
         gumbel_weights_soft = F.gumbel_softmax(logits, tau=self.temperature, hard=False, dim=-1)
 
         z_q_hard = torch.matmul(gumbel_weights_hard, self.embedding.weight).reshape(b, n, d)
