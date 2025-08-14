@@ -20,6 +20,8 @@ from f5_tts.model.dataset import DynamicBatchSampler, collate_fn
 from f5_tts.model.utils import default, exists
 from f5_tts.model.backbones.dit import LanguageModule
 
+import matplotlib.pyplot as plt
+
 
 # trainer
 
@@ -505,17 +507,12 @@ class Trainer:
                 indices_this_process = torch.cat([idx.flatten() for idx in all_encoding_indices])
                 gathered_indices = self.accelerator.gather(indices_this_process)
                 if self.accelerator.is_local_main_process:
-                    if self.logger == "wandb":
-                        self.accelerator.log(
-                            {"encoding_indices_distribution": wandb.Histogram(gathered_indices.cpu().numpy())},
-                            step=global_update,
-                        )
-                    elif self.logger == "tensorboard":
-                        self.writer.add_histogram(
-                            "encoding_indices_distribution",
-                            gathered_indices.cpu(),
-                            global_update,
-                        )
+                    ifig, ax = plt.subplots()
+                    ax.hist(gathered_indices.cpu().numpy(), bins='auto')
+                    ax.set_xlabel("Encoding index")
+                    ax.set_ylabel("Frequency")
+                    self.accelerator.log({"encoding_indices_distribution": wandb.Image(fig)}, step=global_update)
+                    plt.close(fig)
             if sanity_check:
                 break
 
