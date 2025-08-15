@@ -386,7 +386,7 @@ class Trainer:
                         dur_loss = self.duration_predictor(mel_spec, lens=batch.get("durations"))
                         self.accelerator.log({"duration loss": dur_loss.item()}, step=global_update)
 
-                    text_embed, loss_vq, encoding_indices = self.language_module(text=text_inputs, seq_len=mel_spec.shape[1])
+                    text_embed, loss_vq, encoding_indices = self.language_module(text=text_inputs, seq_len=mel_spec.shape[1], step=global_update)
 
                     if encoding_indices is not None:
                         all_encoding_indices.append(encoding_indices.detach())
@@ -449,6 +449,7 @@ class Trainer:
                                 cfg_strength=cfg_strength,
                                 sway_sampling_coef=sway_sampling_coef,
                                 language_module=self.language_module,
+                                step=global_update,
                             )
                             generated = generated.to(torch.float32)
                             gen_mel_spec = generated[:, ref_audio_len:, :].permute(0, 2, 1).to(self.accelerator.device)
@@ -485,7 +486,8 @@ class Trainer:
                                 steps=nfe_step,
                                 cfg_strength=cfg_strength,
                                 sway_sampling_coef=sway_sampling_coef,
-                                language_module=self.language_module
+                                language_module=self.language_module,
+                                step=global_update
                             )
                             generated = generated.to(torch.float32)
                             gen_mel_spec = generated[:, ref_audio_len:, :].permute(0, 2, 1).to(self.accelerator.device)

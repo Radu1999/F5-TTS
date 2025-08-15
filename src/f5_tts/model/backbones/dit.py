@@ -45,7 +45,7 @@ class LanguageModule(nn.Module):
         self.text_embed = nn.Embedding(text_num_embeds + 1, text_dim)
         self.mask_padding = mask_padding
 
-    def forward(self, text: int["b nt"], seq_len, drop_text=False, global_update=None, inference=False):  # noqa: F722
+    def forward(self, text: int["b nt"], seq_len, drop_text=False, global_update=None, inference=False, step=None):  # noqa: F722
         if isinstance(text, list):
             text = list_str_to_idx(text, self.vocab_char_map).to('cuda')
         text = text + 1  # use 0 as filler token. preprocess of batch pad -1, see list_str_to_idx()
@@ -62,9 +62,10 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
-        z_q, loss, encoding_indices = self.vq_layer(text, hard=inference)
-
-        return z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0), loss, encoding_indices
+        if step is not None and step > 10000:
+            z_q, loss, encoding_indices = self.vq_layer(text, hard=inference)
+            return z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0), loss, encoding_indices
+        return text, None, None
 
     def build_vq(self, text_embed: nn.Embedding):
         self.vq_layer = VQEmbedding(embedding=text_embed, embedding_dim=text_embed.weight.shape[1]).to('cuda')

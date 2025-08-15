@@ -99,6 +99,7 @@ class CFM(nn.Module):
         duplicate_test=False,
         t_inter=0.1,
         edit_mask=None,
+        step=None,
     ):
         self.eval()
         # raw wave
@@ -164,7 +165,7 @@ class CFM(nn.Module):
             # step_cond = torch.where(cond_mask, cond, torch.zeros_like(cond))
 
             # predict flow (cond)
-            text_embeds, _, _= language_module(text, seq_len=x.shape[1], inference=True) if language_module is not None else (None, None)
+            text_embeds, _, _= language_module(text, step=step, seq_len=x.shape[1], inference=True) if language_module is not None else (None, None, None)
             if cfg_strength < 1e-5:
                 pred = self.transformer(
                     x=x,
@@ -245,7 +246,6 @@ class CFM(nn.Module):
             inp = self.mel_spec(inp)
             inp = inp.permute(0, 2, 1)
             assert inp.shape[-1] == self.num_channels
-
         batch, seq_len, dtype, device, _σ1 = *inp.shape[:2], inp.dtype, self.device, self.sigma
 
         # handle text as string
