@@ -75,7 +75,7 @@ def get_bigvgan_mel_spectrogram(
 
 
 class VQEmbedding(nn.Module):
-    def __init__(self, embedding_dim=128, commitment_cost=0.1, num_embeddings=2548,
+    def __init__(self, embedding_dim=128, commitment_cost=0.1, num_embeddings=2549,
                  embedding: nn.Embedding = None, temperature=5,
                  temperature_min=1.0, anneal_rate=0.999):
         super().__init__()
@@ -90,20 +90,15 @@ class VQEmbedding(nn.Module):
             nn.ReLU(),
             nn.Linear(1024, 2048),
             nn.ReLU(),
-            nn.Linear(2048, embedding.weight.shape[0])
+            nn.Linear(2048, num_embeddings)
         )
 
         self.max_alpha = 1.0
 
-        if embedding is None:
-            self.embedding_dim = embedding_dim
-            self.num_embeddings = num_embeddings
-            self.embedding = nn.Embedding(num_embeddings, embedding_dim)
-            self.embedding.weight.data.uniform_(-1 / self.num_embeddings, 1 / self.num_embeddings)
-        else:
-            self.embedding = embedding
-            self.embedding_dim = self.embedding.weight.shape[1]
-            self.num_embeddings = self.embedding.weight.shape[0]
+        self.embedding_dim = embedding_dim
+        self.num_embeddings = num_embeddings
+        self.embedding = nn.Embedding(num_embeddings, embedding_dim)
+        self.embedding.weight.data.uniform_(-1 / self.num_embeddings, 1 / self.num_embeddings)
 
     def forward(self, z, hard=True, text_mask=None):
 
