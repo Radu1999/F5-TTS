@@ -75,7 +75,7 @@ def get_bigvgan_mel_spectrogram(
 
 
 class VQEmbedding(nn.Module):
-    def __init__(self, embedding_dim=128, commitment_cost=0.01, num_embeddings=2549,
+    def __init__(self, embedding_dim=128, commitment_cost=0.01, num_embeddings=128,
                  embedding: nn.Embedding = None, temperature=1.0,
                  temperature_min=0.9, anneal_rate=0.999):
         super().__init__()
