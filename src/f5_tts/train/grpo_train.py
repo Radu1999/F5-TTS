@@ -51,8 +51,8 @@ vocoder = load_vocoder(
 
 # -------------------------- Dataset Settings --------------------------- #
 parser = argparse.ArgumentParser()
-parser.add_argument('--ckpt_path', type=str, default=None, help='Path to checkpoint file (.pt or .safetensors)')
-parser.add_argument('--dataset_name', type=str, default='ro_tts_common', help='Dataset name to load')
+parser.add_argument('--ckpt_path', type=str, default=r"C:\Users\Mihaitza\Desktop\F5-TTS\ckpts\ro_tts\pretrained_model_1250000.safetensors", help='Path to checkpoint file (.pt or .safetensors)')
+parser.add_argument('--dataset_name', type=str, default='ro_tts', help='Dataset name to load')
 args = parser.parse_args()
 
 target_sample_rate = 24000
@@ -131,6 +131,9 @@ def reward_gen(completions, mel_spec, **kwargs):
     rewards = []
     for gen in generated:
         gen_mel_spec = gen[ref_audio_len:, :].unsqueeze(0).permute(0, 2, 1).to('cuda', dtype=torch.float32)
+        length = min(gen_mel_spec.shape[-1], ref_mel_spec.shape[-1])
+        gen_mel_spec = gen_mel_spec[:length]
+        ref_mel_spec = ref_mel_spec[:length]
         reward = -loss(gen_mel_spec, ref_mel_spec)
         rewards.append(float(reward.detach().cpu().item()))
 
