@@ -158,7 +158,7 @@ def convert_char_to_pinyin(text_list, polyphone=True):
         #     "\u3100" <= c <= "\u9fff"  # common chinese characters
         # )
         return False
-
+    return text_list
     for text in text_list:
         char_list = []
         text = text.translate(custom_trans)

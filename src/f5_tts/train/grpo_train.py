@@ -131,17 +131,26 @@ def reward_gen(completions, mel_spec, **kwargs):
     rewards = []
     for gen in generated:
         gen_mel_spec = gen[ref_audio_len:, :].unsqueeze(0).permute(0, 2, 1).to('cuda', dtype=torch.float32)
-        length = min(gen_mel_spec.shape[-1], ref_mel_spec.shape[-1])
-        gen_mel_spec = gen_mel_spec[:length]
-        ref_mel_spec = ref_mel_spec[:length]
-        reward = -loss(gen_mel_spec, ref_mel_spec)
+        
+        # Ensure both mel spectrograms have the same time dimension
+        min_time_len = min(gen_mel_spec.shape[2], ref_mel_spec.shape[2])
+        gen_mel_spec = gen_mel_spec[:, :, :min_time_len]
+        ref_mel_spec_cropped = ref_mel_spec[:, :, :min_time_len]
+        
+        reward = -loss(gen_mel_spec, ref_mel_spec_cropped)
         rewards.append(float(reward.detach().cpu().item()))
 
     global_step += 1
     if global_step % 1000 == 0:
-        gen_mel_spec = generated[0][ref_audio_len:, :].unsqueeze(0).permute(0, 2, 1).to('cuda', dtype=torch.float32)
-        gen_audio = vocoder.decode(gen_mel_spec).cpu()
-        ref_audio = vocoder.decode(ref_mel_spec).cpu()
+        gen_mel_spec_sanity = generated[0][ref_audio_len:, :].unsqueeze(0).permute(0, 2, 1).to('cuda', dtype=torch.float32)
+        
+        # Ensure both have same length for consistent comparison
+        min_time_len_sanity = min(gen_mel_spec_sanity.shape[2], ref_mel_spec.shape[2])
+        gen_mel_spec_sanity = gen_mel_spec_sanity[:, :, :min_time_len_sanity]
+        ref_mel_spec_sanity = ref_mel_spec[:, :, :min_time_len_sanity]
+        
+        gen_audio = vocoder.decode(gen_mel_spec_sanity).cpu()
+        ref_audio = vocoder.decode(ref_mel_spec_sanity).cpu()
         torchaudio.save(f"./sanity_check_grpo_gen_{global_step}.wav", gen_audio, target_sample_rate)
         torchaudio.save(f"./sanity_check_grpo_ref_{global_step}.wav", ref_audio, target_sample_rate)
     return rewards
