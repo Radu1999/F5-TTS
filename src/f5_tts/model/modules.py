@@ -75,7 +75,7 @@ def get_bigvgan_mel_spectrogram(
 
 
 class VQEmbedding(nn.Module):
-    def __init__(self, embedding_dim=128, commitment_cost=0.01, num_embeddings=128,
+    def __init__(self, embedding_dim=128, commitment_cost=0.01, num_embeddings=1024,
                  embedding: nn.Embedding = None, temperature=1.0,
                  temperature_min=0.9, anneal_rate=0.999):
         super().__init__()
@@ -109,24 +109,73 @@ class VQEmbedding(nn.Module):
 
         z_flattened = z.reshape(b * n, d)
         logits = self.classifier(z_flattened)
-        gumbel_weights_hard = F.gumbel_softmax(logits, tau=self.temperature, hard=True, dim=-1)
-        gumbel_weights_soft = F.gumbel_softmax(logits, tau=self.temperature, hard=False, dim=-1)
+        gumbel_weights = F.gumbel_softmax(logits, tau=self.temperature, hard=True, dim=-1)
         kl_loss = None
         if not hard:
-            mask = (torch.rand_like(gumbel_weights_soft[..., 0]) < 0.4).unsqueeze(-1).expand_as(gumbel_weights_soft)
-            weights = torch.where(mask, gumbel_weights_soft, gumbel_weights_hard)
-            z_q = torch.matmul(weights, self.embedding.weight).reshape(b, n, d)
-
+            z_q = torch.matmul(gumbel_weights, self.embedding.weight).reshape(b, n, d)
             # KL loss to push to uniform
-            avg_probs = torch.mean(weights, dim=0)
+            avg_probs = torch.mean(F.softmax(logits), dim=0)
             kl_loss = (avg_probs * torch.log(avg_probs + 1e-8)).sum() * self.commitment_cost
-
         else:
             z_q = torch.argmax(logits, dim=-1)
             z_q = self.embedding(z_q).reshape(b, n, d)
 
-        encoding_indices = torch.argmax(gumbel_weights_hard, dim=-1)
+        encoding_indices = torch.argmax(logits, dim=-1)
         return z_q, kl_loss, encoding_indices
+
+# class VQEmbedding(nn.Module):
+#     def __init__(self, embedding_dim=128, commitment_cost=0.01, num_embeddings=1024,
+#                  embedding: nn.Embedding = None, temperature=1.0,
+#                  temperature_min=0.9, anneal_rate=0.999):
+#         super().__init__()
+#         self.commitment_cost = commitment_cost
+#         self.temperature = temperature
+#
+#         self.temperature_min = temperature_min
+#         self.anneal_rate = anneal_rate
+#
+#         self.classifier = nn.Sequential(
+#             nn.Linear(embedding_dim, 1024),
+#             nn.ReLU(),
+#             nn.Linear(1024, 2048),
+#             nn.ReLU(),
+#             nn.Linear(2048, num_embeddings)
+#         )
+#
+#         self.max_alpha = 1.0
+#
+#         self.embedding_dim = embedding_dim
+#         self.num_embeddings = num_embeddings
+#         self.embedding = nn.Embedding(num_embeddings, embedding_dim)
+#         self.embedding.weight.data.uniform_(-1 / self.num_embeddings, 1 / self.num_embeddings)
+#
+#     def forward(self, z, hard=True, text_mask=None):
+#
+#         self.temperature = max(self.temperature * self.anneal_rate, self.temperature_min)
+#
+#         b, n, d = z.shape
+#         assert d == self.embedding_dim, f"Input channel {d} does not match embedding dim {self.embedding_dim}"
+#
+#         z_flattened = z.reshape(b * n, d)
+#         logits = self.classifier(z_flattened)
+#         gumbel_weights_hard = F.gumbel_softmax(logits, tau=self.temperature, hard=True, dim=-1)
+#         gumbel_weights_soft = F.gumbel_softmax(logits, tau=self.temperature, hard=False, dim=-1)
+#         kl_loss = None
+#         if not hard:
+#             mask = (torch.rand_like(gumbel_weights_soft[..., 0]) < 0.4).unsqueeze(-1).expand_as(gumbel_weights_soft)
+#             weights = torch.where(mask, gumbel_weights_soft, gumbel_weights_hard)
+#             z_q = torch.matmul(weights, self.embedding.weight).reshape(b, n, d)
+#
+#             # KL loss to push to uniform
+#             avg_probs = torch.mean(weights, dim=0)
+#             kl_loss = (avg_probs * torch.log(avg_probs + 1e-8)).sum() * self.commitment_cost
+#
+#         else:
+#             z_q = torch.argmax(logits, dim=-1)
+#             z_q = self.embedding(z_q).reshape(b, n, d)
+#
+#         encoding_indices = torch.argmax(gumbel_weights_hard, dim=-1)
+#         return z_q, kl_loss, encoding_indices
 
 
 # class VQEmbedding(nn.Module):
