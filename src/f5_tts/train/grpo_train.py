@@ -10,6 +10,7 @@ import torchaudio
 import torch.nn.functional as F
 from f5_tts.infer.utils_infer import load_checkpoint
 import argparse
+from transformers import AutoModelForCausalLM
 
 
 class PerceptualLoss(torch.nn.Module):
@@ -156,9 +157,16 @@ def reward_gen(completions, mel_spec, **kwargs):
     return rewards
 
 
-training_args = GRPOConfig(output_dir="Qwen2-0.5B-GRPO")
+training_args = GRPOConfig(output_dir="gemma2b")
+
+llm = AutoModelForCausalLM.from_pretrained(
+    "google/gemma-2-2b",
+    device_map="auto",
+    attn_implementation='eager'
+)
+
 trainer = GRPOTrainer(
-    model="google/gemma-2-2b",
+    model=llm,
     reward_funcs=reward_gen,
     args=training_args,
     train_dataset=train_dataset,
