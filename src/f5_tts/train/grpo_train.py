@@ -22,6 +22,11 @@ class PerceptualLoss(torch.nn.Module):
         # Register hooks for all convnext blocks
         for idx, module in enumerate(backbone.convnext):
             module.register_forward_hook(self.save_output(f"convnext.{idx}"))
+        
+        # Layer weights - give more importance to later layers (higher level features)
+        num_layers = len(backbone.convnext)
+        self.layer_weights = torch.tensor([0.5 + 0.5 * (i / max(1, num_layers - 1)) 
+                                         for i in range(num_layers)])
 
     def save_output(self, name):
         def hook(module, input, output):
@@ -38,12 +43,40 @@ class PerceptualLoss(torch.nn.Module):
         _ = self.backbone(y)
         feats_y = self.features.copy()
 
-        # Average L1 loss across all hooked layers
+        # Compute weighted and normalized perceptual loss
         losses = []
-        for layer in feats_x.keys():
-            losses.append(F.l1_loss(feats_x[layer], feats_y[layer]))
-
-        return sum(losses) / len(losses)
+        weights = []
+        
+        for i, layer in enumerate(sorted(feats_x.keys())):
+            feat_x = feats_x[layer]
+            feat_y = feats_y[layer]
+            
+            # Normalize features to unit variance per channel to handle scale differences
+            feat_x_norm = F.normalize(feat_x.flatten(2), p=2, dim=2)
+            feat_y_norm = F.normalize(feat_y.flatten(2), p=2, dim=2)
+            
+            # Cosine similarity loss (1 - cosine_similarity) for better perceptual alignment
+            cos_sim = F.cosine_similarity(feat_x_norm, feat_y_norm, dim=2).mean()
+            perceptual_loss = 1.0 - cos_sim
+            
+            # Also include L1 loss for magnitude differences
+            l1_loss = F.l1_loss(feat_x_norm, feat_y_norm)
+            
+            # Combine both losses
+            combined_loss = 0.7 * perceptual_loss + 0.3 * l1_loss
+            
+            losses.append(combined_loss)
+            weights.append(self.layer_weights[i] if i < len(self.layer_weights) else 1.0)
+        
+        # Weighted average of losses
+        if losses:
+            weights_tensor = torch.tensor(weights, device=losses[0].device)
+            weights_tensor = weights_tensor / weights_tensor.sum()  # Normalize weights
+            
+            total_loss = sum(w * loss for w, loss in zip(weights_tensor, losses))
+            return total_loss
+        else:
+            return torch.tensor(0.0, device=x.device)
 
 
 vocoder = load_vocoder(
@@ -132,24 +165,24 @@ def reward_gen(completions, mel_spec, **kwargs):
     rewards = []
     for gen in generated:
         gen_mel_spec = gen[ref_audio_len:, :].unsqueeze(0).permute(0, 2, 1).to('cuda', dtype=torch.float32)
-        
+
         # Ensure both mel spectrograms have the same time dimension
         min_time_len = min(gen_mel_spec.shape[2], ref_mel_spec.shape[2])
         gen_mel_spec = gen_mel_spec[:, :, :min_time_len]
         ref_mel_spec_cropped = ref_mel_spec[:, :, :min_time_len]
-        
+
         reward = -loss(gen_mel_spec, ref_mel_spec_cropped)
         rewards.append(float(reward.detach().cpu().item()))
 
     global_step += 1
     if global_step % 1000 == 0:
         gen_mel_spec_sanity = generated[0][ref_audio_len:, :].unsqueeze(0).permute(0, 2, 1).to('cuda', dtype=torch.float32)
-        
+
         # Ensure both have same length for consistent comparison
         min_time_len_sanity = min(gen_mel_spec_sanity.shape[2], ref_mel_spec.shape[2])
         gen_mel_spec_sanity = gen_mel_spec_sanity[:, :, :min_time_len_sanity]
         ref_mel_spec_sanity = ref_mel_spec[:, :, :min_time_len_sanity]
-        
+
         gen_audio = vocoder.decode(gen_mel_spec_sanity).cpu()
         ref_audio = vocoder.decode(ref_mel_spec_sanity).cpu()
         torchaudio.save(f"./sanity_check_grpo_gen_{global_step}.wav", gen_audio, target_sample_rate)
