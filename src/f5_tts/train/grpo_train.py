@@ -158,7 +158,7 @@ def reward_gen(completions, mel_spec, **kwargs):
 
 training_args = GRPOConfig(output_dir="Qwen2-0.5B-GRPO")
 trainer = GRPOTrainer(
-    model="Qwen/Qwen2.5-0.5B",
+    model="google/gemma-2-2b",
     reward_funcs=reward_gen,
     args=training_args,
     train_dataset=train_dataset,
