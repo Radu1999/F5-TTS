@@ -131,6 +131,7 @@ class CustomDataset(Dataset):
             audio_path = row["audio_path"]
             text = row["text"]
             duration = row["duration"]
+            prompt = row.get("prompt", None)
 
             # filter by given length
             if 0.3 <= duration <= 30:
@@ -158,6 +159,7 @@ class CustomDataset(Dataset):
 
         return {
             "mel_spec": mel_spec,
+            "prompt": prompt,
             "text": text,
         }
 
