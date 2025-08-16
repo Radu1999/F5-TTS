@@ -130,13 +130,13 @@ def reward_gen(completions, mel_spec, **kwargs):
     ref_mel_spec = spec.unsqueeze(0).permute(0, 2, 1).to('cuda', dtype=torch.float32)
     rewards = []
     for gen in generated:
-        gen_mel_spec = gen[:, ref_audio_len:, :].permute(0, 2, 1).to('cuda', dtype=torch.float32)
+        gen_mel_spec = gen[ref_audio_len:, :].unsqueeze(0).permute(0, 2, 1).to('cuda', dtype=torch.float32)
         reward = -loss(gen_mel_spec, ref_mel_spec)
         rewards.append(float(reward.detach().cpu().item()))
 
     global_step += 1
     if global_step % 1000 == 0:
-        gen_mel_spec = generated[0][:, ref_audio_len:, :].permute(0, 2, 1).to('cuda', dtype=torch.float32)
+        gen_mel_spec = generated[0][ref_audio_len:, :].unsqueeze(0).permute(0, 2, 1).to('cuda', dtype=torch.float32)
         gen_audio = vocoder.decode(gen_mel_spec).cpu()
         ref_audio = vocoder.decode(ref_mel_spec).cpu()
         torchaudio.save(f"./sanity_check_grpo_gen_{global_step}.wav", gen_audio, target_sample_rate)
