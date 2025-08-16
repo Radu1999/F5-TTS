@@ -41,6 +41,7 @@ dependencies = [
     "unidecode",
     "vocos",
     "wandb",
+    "trl",
     "x_transformers>=1.31.14",
 ]
 
