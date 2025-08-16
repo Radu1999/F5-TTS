@@ -62,10 +62,11 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
+        z_q, loss, encoding_indices = self.vq_layer(text, hard=inference)
+        z_q = z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0), loss, encoding_indices
         if step is not None and step > 10000:
-            z_q, loss, encoding_indices = self.vq_layer(text, hard=inference)
-            return z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0), loss, encoding_indices
-        return text, None, None
+            return z_q, loss, encoding_indices
+        return text + z_q, loss, None
 
     def build_vq(self, text_embed: nn.Embedding):
         self.vq_layer = VQEmbedding(embedding=text_embed, embedding_dim=text_embed.weight.shape[1]).to('cuda')
