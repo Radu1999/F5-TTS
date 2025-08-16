@@ -160,7 +160,7 @@ def reward_gen(completions, mel_spec, **kwargs):
 training_args = GRPOConfig(output_dir="gemma2b")
 
 llm = AutoModelForCausalLM.from_pretrained(
-    "google/gemma-2-2b",
+    "google/gemma-2-2b-it",
     device_map="auto",
     attn_implementation='eager'
 )
