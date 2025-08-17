@@ -14,6 +14,8 @@ import torch.nn.functional as F
 from torch import nn
 from x_transformers.x_transformers import RotaryEmbedding
 from transformers import AutoModel, AutoTokenizer
+from vector_quantize_pytorch import ResidualVQ
+
 
 from f5_tts.model.modules import (
     AdaLayerNorm_Final,
@@ -44,6 +46,7 @@ class LanguageModule(nn.Module):
         )
         self.text_embed = nn.Embedding(text_num_embeds + 1, text_dim)
         self.mask_padding = mask_padding
+        self.residual_vq = None
 
     def forward(self, text: int["b nt"], seq_len, drop_text=False, global_update=None, inference=False, step=None):  # noqa: F722
         if isinstance(text, list):
@@ -62,23 +65,29 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
-        z_q, loss, encoding_indices = self.vq_layer(text, hard=inference)
+        z_q, encoding_indices, loss = self.residual_vq(text)
         z_q = z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
-        if self.training and step is not None and step < 10000:
-            p = 0.9 * (1 - step / 10000.0)
+        # if self.training and step is not None and step < 10000:
+        #     p = 0.9 * (1 - step / 10000.0)
+        #
+        #     if torch.rand(1).item() < p:
+        #         out = text
+        #     else:
+        #         out = z_q  # use VQ
+        # else:
+        #     out = z_q  # always use VQ after warmup
 
-            if torch.rand(1).item() < p:
-                out = text
-            else:
-                out = z_q  # use VQ
-        else:
-            out = z_q  # always use VQ after warmup
-
-        return out, loss, encoding_indices
+        return z_q, loss.mean(), encoding_indices
 
     def build_vq(self, text_embed: nn.Embedding):
         self.vq_layer = VQEmbedding(embedding=text_embed, embedding_dim=text_embed.weight.shape[1]).to('cuda')
         self.codebook = text_embed
+
+        self.residual_vq = ResidualVQ(
+            dim=512,
+            num_quantizers=8,  # specify number of quantizers
+            codebook_size=1024,  # codebook size
+        ).to('cuda')
 
 
 class TextEmbedding(nn.Module):
