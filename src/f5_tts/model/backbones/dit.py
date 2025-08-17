@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from torch import nn
 from x_transformers.x_transformers import RotaryEmbedding
 from transformers import AutoModel, AutoTokenizer
-from vector_quantize_pytorch import ResidualVQ
+from vector_quantize_pytorch import ResidualSimVQ, VectorQuantize
 
 
 from f5_tts.model.modules import (
@@ -82,12 +82,17 @@ class LanguageModule(nn.Module):
     def build_vq(self, text_embed: nn.Embedding):
         self.vq_layer = VQEmbedding(embedding=text_embed, embedding_dim=text_embed.weight.shape[1]).to('cuda')
         self.codebook = text_embed
-
-        self.residual_vq = ResidualVQ(
+        self.residual_vq = VectorQuantize(
             dim=512,
-            num_quantizers=8,  # specify number of quantizers
-            codebook_size=1024,  # codebook size
+            codebook_size=1024,
+            decay=0.8,
+            commitment_weight=1.
         ).to('cuda')
+        # self.residual_vq = ResidualSimVQ(
+        #     dim=512,
+        #     num_quantizers=8,  # specify number of quantizers
+        #     codebook_size=1024,  # codebook size
+        # ).to('cuda')
 
 
 class TextEmbedding(nn.Module):
