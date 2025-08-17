@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from torch import nn
 from x_transformers.x_transformers import RotaryEmbedding
 from transformers import AutoModel, AutoTokenizer
-from vector_quantize_pytorch import ResidualSimVQ, VectorQuantize
+from vector_quantize_pytorch import ResidualSimVQ, VectorQuantize, ResidualVQ
 
 from f5_tts.model.modules import (
     AdaLayerNorm_Final,
@@ -89,6 +89,7 @@ class LanguageModule(nn.Module):
             codebook_size=text_embed.weight.data.shape[0],
             decay=0.8,
             commitment_weight=1.,
+            rotation_trick=True,
             freeze_codebook=True,
         ).to('cuda')
 
