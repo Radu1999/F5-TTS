@@ -75,7 +75,7 @@ def get_bigvgan_mel_spectrogram(
 
 
 class VQEmbedding(nn.Module):
-    def __init__(self, embedding_dim=128, commitment_cost=0.01, num_embeddings=1024,
+    def __init__(self, embedding_dim=128, commitment_cost=0.25, num_embeddings=1024,
                  embedding: nn.Embedding = None, temperature=1.0,
                  temperature_min=0.9, anneal_rate=0.999):
         super().__init__()
@@ -100,28 +100,30 @@ class VQEmbedding(nn.Module):
         self.embedding = nn.Embedding(num_embeddings, embedding_dim)
         self.embedding.weight.data.uniform_(-1 / self.num_embeddings, 1 / self.num_embeddings)
 
-    def forward(self, z, hard=True, text_mask=None):
-
-        self.temperature = max(self.temperature * self.anneal_rate, self.temperature_min)
-
+    def forward(self, z, hard=False):
+        # z: [b, n, d]
         b, n, d = z.shape
-        assert d == self.embedding_dim, f"Input channel {d} does not match embedding dim {self.embedding_dim}"
+        z_flattened = z.reshape(-1, d)
 
-        z_flattened = z.reshape(b * n, d)
-        logits = self.classifier(z_flattened)
-        gumbel_weights = F.gumbel_softmax(logits, tau=self.temperature, hard=True, dim=-1)
-        kl_loss = None
-        if not hard:
-            z_q = torch.matmul(gumbel_weights, self.embedding.weight).reshape(b, n, d)
-            # KL loss to push to uniform
-            avg_probs = torch.mean(F.softmax(logits), dim=0)
-            kl_loss = (avg_probs * torch.log(avg_probs + 1e-8)).sum() * self.commitment_cost
-        else:
-            z_q = torch.argmax(logits, dim=-1)
-            z_q = self.embedding(z_q).reshape(b, n, d)
+        # compute distances
+        dist = (
+            z_flattened.pow(2).sum(1, keepdim=True)
+            - 2 * z_flattened @ self.embedding.weight.t()
+            + self.embedding.weight.pow(2).sum(1)
+        )  # [b*n, num_embeddings]
 
-        encoding_indices = torch.argmax(logits, dim=-1)
-        return z_q, kl_loss, encoding_indices
+        encoding_indices = torch.argmin(dist, dim=1)
+        z_q = self.embedding(encoding_indices).view(b, n, d)
+
+        # losses
+        e_latent_loss = F.mse_loss(z_q.detach(), z)
+        q_latent_loss = F.mse_loss(z_q, z.detach())
+        loss = q_latent_loss + self.commitment_cost * e_latent_loss
+
+        # straight-through estimator
+        z_q = z + (z_q - z).detach()
+
+        return z_q, loss, encoding_indices.view(b, n)
 
 # class VQEmbedding(nn.Module):
 #     def __init__(self, embedding_dim=128, commitment_cost=0.01, num_embeddings=1024,
