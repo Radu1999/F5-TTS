@@ -75,30 +75,20 @@ def get_bigvgan_mel_spectrogram(
 
 
 class VQEmbedding(nn.Module):
-    def __init__(self, embedding_dim=128, commitment_cost=0.25, num_embeddings=1024,
-                 embedding: nn.Embedding = None, temperature=1.0,
-                 temperature_min=0.9, anneal_rate=0.999):
+    def __init__(self,  embedding_dim=128, commitment_cost=0.25, num_embeddings=1024,
+                 decay=0.99, eps=1e-5, **kwargs):
         super().__init__()
-        self.commitment_cost = commitment_cost
-        self.temperature = temperature
-
-        self.temperature_min = temperature_min
-        self.anneal_rate = anneal_rate
-
-        self.classifier = nn.Sequential(
-            nn.Linear(embedding_dim, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, 2048),
-            nn.ReLU(),
-            nn.Linear(2048, num_embeddings)
-        )
-
-        self.max_alpha = 1.0
-
         self.embedding_dim = embedding_dim
         self.num_embeddings = num_embeddings
-        self.embedding = nn.Embedding(num_embeddings, embedding_dim)
-        self.embedding.weight.data.uniform_(-1 / self.num_embeddings, 1 / self.num_embeddings)
+        self.commitment_cost = commitment_cost
+        self.decay = decay
+        self.eps = eps
+
+        # actual embedding weights (the codebook)
+        embed = torch.randn(num_embeddings, embedding_dim).uniform_(-1 / self.num_embeddings, 1 / self.num_embeddings)
+        self.register_buffer("embedding", embed)
+        self.register_buffer("cluster_size", torch.zeros(num_embeddings))
+        self.register_buffer("embedding_avg", embed.clone())
 
     def forward(self, z, hard=False):
         # z: [b, n, d]
@@ -108,22 +98,42 @@ class VQEmbedding(nn.Module):
         # compute distances
         dist = (
             z_flattened.pow(2).sum(1, keepdim=True)
-            - 2 * z_flattened @ self.embedding.weight.t()
-            + self.embedding.weight.pow(2).sum(1)
+            - 2 * z_flattened @ self.embedding.t()
+            + self.embedding.pow(2).sum(1)
         )  # [b*n, num_embeddings]
 
-        encoding_indices = torch.argmin(dist, dim=1)
-        z_q = self.embedding(encoding_indices).view(b, n, d)
+        encoding_indices = torch.argmin(dist, dim=1)  # [b*n]
+        encodings = F.one_hot(encoding_indices, self.num_embeddings).type(z.dtype)
+
+        # quantized vectors
+        z_q = F.embedding(encoding_indices, self.embedding).view(b, n, d)
+
+        # EMA update for embedding
+        if self.training:
+            cluster_size = encodings.sum(0)  # [num_embeddings]
+            embed_sum = encodings.t() @ z_flattened  # [num_embeddings, d]
+
+            # update moving averages
+            self.cluster_size.mul_(self.decay).add_(cluster_size, alpha=1 - self.decay)
+            self.embedding_avg.mul_(self.decay).add_(embed_sum, alpha=1 - self.decay)
+
+            # normalize to get updated embeddings
+            n = self.cluster_size.sum()
+            cluster_size = (
+                (self.cluster_size + self.eps)
+                / (n + self.num_embeddings * self.eps)
+                * n
+            )
+            self.embedding.copy_(self.embedding_avg / cluster_size.unsqueeze(1))
 
         # losses
         e_latent_loss = F.mse_loss(z_q.detach(), z)
-        q_latent_loss = F.mse_loss(z_q, z.detach())
-        loss = q_latent_loss + self.commitment_cost * e_latent_loss
+        loss = self.commitment_cost * e_latent_loss
 
         # straight-through estimator
         z_q = z + (z_q - z).detach()
 
-        return z_q, loss, encoding_indices.view(b, n)
+        return z_q, loss, encoding_indices
 
 # class VQEmbedding(nn.Module):
 #     def __init__(self, embedding_dim=128, commitment_cost=0.01, num_embeddings=1024,
