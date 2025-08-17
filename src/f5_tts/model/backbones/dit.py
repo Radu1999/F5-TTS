@@ -16,7 +16,6 @@ from x_transformers.x_transformers import RotaryEmbedding
 from transformers import AutoModel, AutoTokenizer
 from vector_quantize_pytorch import ResidualSimVQ, VectorQuantize
 
-
 from f5_tts.model.modules import (
     AdaLayerNorm_Final,
     ConvNeXtV2Block,
@@ -36,7 +35,8 @@ from f5_tts.model.utils import (
 
 
 class LanguageModule(nn.Module):
-    def __init__(self, text_num_embeds=256, text_dim=None, conv_mult=2, conv_layers=4, vocab_char_map=None, mask_padding=True):
+    def __init__(self, text_num_embeds=256, text_dim=None, conv_mult=2, conv_layers=4, vocab_char_map=None,
+                 mask_padding=True):
         super().__init__()
         self.vq_layer = None
         self.codebook = None
@@ -48,7 +48,8 @@ class LanguageModule(nn.Module):
         self.mask_padding = mask_padding
         self.residual_vq = None
 
-    def forward(self, text: int["b nt"], seq_len, drop_text=False, global_update=None, inference=False, step=None):  # noqa: F722
+    def forward(self, text: int["b nt"], seq_len, drop_text=False, global_update=None, inference=False,
+                step=None):  # noqa: F722
         if isinstance(text, list):
             text = list_str_to_idx(text, self.vocab_char_map).to('cuda')
         text = text + 1  # use 0 as filler token. preprocess of batch pad -1, see list_str_to_idx()
@@ -65,7 +66,7 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
-        z_q, encoding_indices, loss = self.residual_vq(text)
+        z_q, encoding_indices, loss = self.residual_vq(text, freeze_codebook=True)
         z_q = z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
         # if self.training and step is not None and step < 10000:
         #     p = 0.9 * (1 - step / 10000.0)
@@ -82,12 +83,17 @@ class LanguageModule(nn.Module):
     def build_vq(self, text_embed: nn.Embedding):
         self.vq_layer = VQEmbedding(embedding=text_embed, embedding_dim=text_embed.weight.shape[1]).to('cuda')
         self.codebook = text_embed
+
         self.residual_vq = VectorQuantize(
-            dim=512,
-            codebook_size=1024,
+            dim=text_embed.weight.data.shape[1],
+            codebook_size=text_embed.weight.data.shape[0],
             decay=0.8,
-            commitment_weight=1.
+            commitment_weight=1.,
+            freeze_codebook=True,
         ).to('cuda')
+
+        self.residual_vq.codebook = text_embed.weight.data
+
         # self.residual_vq = ResidualSimVQ(
         #     dim=512,
         #     num_quantizers=8,  # specify number of quantizers
@@ -304,13 +310,16 @@ class DiT(nn.Module):
         # t: conditioning time, text: text, x: noised audio + cond audio + text
         t = self.time_embed(time)
         if cfg_infer:  # pack cond & uncond forward: b n d -> 2b n d
-            x_cond = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False, text_embed=text_embed, cache=cache)
-            x_uncond = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True, text_embed=text_embed, cache=cache)
+            x_cond = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False, text_embed=text_embed,
+                                          cache=cache)
+            x_uncond = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True, text_embed=text_embed,
+                                            cache=cache)
             x = torch.cat((x_cond, x_uncond), dim=0)
             t = torch.cat((t, t), dim=0)
             mask = torch.cat((mask, mask), dim=0) if mask is not None else None
         else:
-            x = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond, drop_text=drop_text, cache=cache, text_embed=text_embed)
+            x = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond, drop_text=drop_text, cache=cache,
+                                     text_embed=text_embed)
 
         rope = self.rotary_embed.forward_from_seq_len(seq_len)
 
