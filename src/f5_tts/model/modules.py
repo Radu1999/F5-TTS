@@ -103,17 +103,23 @@ class VQEmbedding(nn.Module):
         b, n, d = z.shape
         z_flattened = z.reshape(-1, d)
 
-        # compute distances
+        # L2 normalize the vectors
+        z_normalized = F.normalize(z_flattened, p=2, dim=1)
+        embedding_normalized = F.normalize(self.embedding.weight, p=2, dim=1)
+
+        # compute distances using normalized vectors
         dist = (
-            z_flattened.pow(2).sum(1, keepdim=True)
-            - 2 * z_flattened @ self.embedding.weight.t()
-            + self.embedding.weight.pow(2).sum(1)
+                z_normalized.pow(2).sum(1, keepdim=True)
+                - 2 * z_normalized @ embedding_normalized.t()
+                + embedding_normalized.pow(2).sum(1)
         )  # [b*n, num_embeddings]
 
         encoding_indices = torch.argmin(dist, dim=1)
         z_q = self.embedding(encoding_indices).view(b, n, d)
 
         # losses
+        # The losses are computed on the unnormalized vectors
+        # as they represent the original latent space.
         e_latent_loss = F.mse_loss(z_q.detach(), z)
         q_latent_loss = F.mse_loss(z_q, z.detach())
         loss = q_latent_loss + self.commitment_cost * e_latent_loss
