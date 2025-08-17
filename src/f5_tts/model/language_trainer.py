@@ -449,7 +449,7 @@ class Trainer:
                                 cfg_strength=cfg_strength,
                                 sway_sampling_coef=sway_sampling_coef,
                                 language_module=self.language_module,
-                                step=global_update,
+                                step=None,
                             )
                             generated = generated.to(torch.float32)
                             gen_mel_spec = generated[:, ref_audio_len:, :].permute(0, 2, 1).to(self.accelerator.device)
@@ -487,7 +487,7 @@ class Trainer:
                                 cfg_strength=cfg_strength,
                                 sway_sampling_coef=sway_sampling_coef,
                                 language_module=self.language_module,
-                                step=global_update
+                                step=None
                             )
                             generated = generated.to(torch.float32)
                             gen_mel_spec = generated[:, ref_audio_len:, :].permute(0, 2, 1).to(self.accelerator.device)
