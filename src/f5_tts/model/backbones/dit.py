@@ -46,6 +46,7 @@ class LanguageModule(nn.Module):
         )
         self.text_embed = nn.Embedding(text_num_embeds + 1, text_dim)
         self.mask_padding = mask_padding
+        self.pre_proj = None
         self.residual_vq = None
 
     def forward(self, text: int["b nt"], seq_len, drop_text=False, global_update=None, inference=False,
@@ -66,6 +67,7 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
+        text = self.pre_proj(text)
         z_q, encoding_indices, loss = self.residual_vq(text, freeze_codebook=True)
         z_q = z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
         # if self.training and step is not None and step < 10000:
@@ -111,10 +113,12 @@ class LanguageModule(nn.Module):
         #     codebook_size=1024,  # codebook size
         # ).to('cuda')
 
+        self.pre_proj = nn.Linear(text_embed.weight.data.shape[1], text_embed.weight.data.shape[1], bias=False).to('cuda')
+
         self.residual_vq = ResidualVQ(
             dim=text_embed.weight.data.shape[1],
             codebook_size=text_embed.weight.data.shape[0],
-            num_quantizers=128,
+            num_quantizers=4,
             shared_codebook=True,
             # kmeans_init=True,  # set to True
             # kmeans_iters=10  # number of kmeans iterations to calculate the centroids for the codebook on init
