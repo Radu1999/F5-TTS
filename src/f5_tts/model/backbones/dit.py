@@ -114,7 +114,7 @@ class LanguageModule(nn.Module):
         self.residual_vq = ResidualVQ(
             dim=text_embed.weight.data.shape[1],
             codebook_size=text_embed.weight.data.shape[0],
-            num_quantizers=8,
+            num_quantizers=128,
             shared_codebook=True,
             # kmeans_init=True,  # set to True
             # kmeans_iters=10  # number of kmeans iterations to calculate the centroids for the codebook on init
