@@ -67,18 +67,14 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
-        text = self.pre_proj(text)
+        text_proj = self.pre_proj(text)
 
-        z_q, encoding_indices, loss = self.residual_vq(text, freeze_codebook=True)
+        z_q, encoding_indices, loss = self.residual_vq(text_proj, freeze_codebook=True)
         z_q = z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
         if self.training and step is not None and step < 10000:
-            p = 0.9 * (1 - step / 10000.0)
-
-            if torch.rand(1).item() < p:
-                out = text
-            else:
-                out = z_q  # use VQ
+            out = text
         else:
+
             out = z_q  # always use VQ after warmup
 
         return out, loss.mean(), encoding_indices
