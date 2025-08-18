@@ -14,7 +14,7 @@ import torch.nn.functional as F
 from torch import nn
 from x_transformers.x_transformers import RotaryEmbedding
 from transformers import AutoModel, AutoTokenizer
-from vector_quantize_pytorch import ResidualSimVQ, VectorQuantize, ResidualVQ
+from vector_quantize_pytorch import ResidualSimVQ, VectorQuantize, ResidualVQ, SimVQ
 
 from f5_tts.model.modules import (
     AdaLayerNorm_Final,
@@ -66,34 +66,44 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
-        z_q, encoding_indices, loss = self.residual_vq(text, freeze_codebook=True)
+        z_q, encoding_indices, loss = self.residual_vq(text)
         z_q = z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
-        if self.training and step is not None and step < 10000:
-            p = 0.9 * (1 - step / 10000.0)
+        # if self.training and step is not None and step < 10000:
+        #     p = 0.9 * (1 - step / 10000.0)
+        #
+        #     if torch.rand(1).item() < p:
+        #         out = text
+        #     else:
+        #         out = z_q  # use VQ
+        # else:
+        #     out = z_q  # always use VQ after warmup
 
-            if torch.rand(1).item() < p:
-                out = text
-            else:
-                out = z_q  # use VQ
-        else:
-            out = z_q  # always use VQ after warmup
-
-        return out, loss.mean(), encoding_indices
+        return z_q, loss.mean(), encoding_indices
 
     def build_vq(self, text_embed: nn.Embedding):
         self.vq_layer = VQEmbedding(embedding=text_embed, embedding_dim=text_embed.weight.shape[1]).to('cuda')
         self.codebook = text_embed
 
-        self.residual_vq = VectorQuantize(
+        def init_f(codebook):
+            return text_embed.weight.data
+
+        # self.residual_vq = VectorQuantize(
+        #     dim=text_embed.weight.data.shape[1],
+        #     codebook_size=text_embed.weight.data.shape[0],
+        #     decay=0.8,
+        #     commitment_weight=1.,
+        #     rotation_trick=True,
+        #     freeze_codebook=True,
+        # ).to('cuda')
+
+        self.residual_vq = SimVQ(
             dim=text_embed.weight.data.shape[1],
             codebook_size=text_embed.weight.data.shape[0],
-            decay=0.8,
-            commitment_weight=1.,
             rotation_trick=True,
-            freeze_codebook=True,
+            init_fn=init_f
         ).to('cuda')
 
-        self.residual_vq.codebook = text_embed.weight.data
+        # self.residual_vq.codebook = text_embed.weight.data
 
         # self.residual_vq = ResidualSimVQ(
         #     dim=512,
