@@ -66,7 +66,7 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
-        z_q, encoding_indices, loss = self.residual_vq(text)
+        z_q, encoding_indices, loss = self.residual_vq(text, freeze_codebook=True)
         z_q = z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
         # if self.training and step is not None and step < 10000:
         #     p = 0.9 * (1 - step / 10000.0)
@@ -114,10 +114,8 @@ class LanguageModule(nn.Module):
         self.residual_vq = ResidualVQ(
             dim=text_embed.weight.data.shape[1],
             codebook_size=text_embed.weight.data.shape[0],
-            num_quantizers=4,
+            num_quantizers=8,
             shared_codebook=True,
-            freeze_codebook=True
-
             # kmeans_init=True,  # set to True
             # kmeans_iters=10  # number of kmeans iterations to calculate the centroids for the codebook on init
         ).to('cuda')
