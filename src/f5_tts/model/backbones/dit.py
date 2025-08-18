@@ -96,12 +96,12 @@ class LanguageModule(nn.Module):
         #     freeze_codebook=True,
         # ).to('cuda')
 
-        self.residual_vq = SimVQ(
-            dim=text_embed.weight.data.shape[1],
-            codebook_size=text_embed.weight.data.shape[0],
-            rotation_trick=True,
-            init_fn=init_f
-        ).to('cuda')
+        # self.residual_vq = SimVQ(
+        #     dim=text_embed.weight.data.shape[1],
+        #     codebook_size=text_embed.weight.data.shape[0],
+        #     rotation_trick=True,
+        #     init_fn=init_f
+        # ).to('cuda')
 
         # self.residual_vq.codebook = text_embed.weight.data
 
@@ -110,6 +110,18 @@ class LanguageModule(nn.Module):
         #     num_quantizers=8,  # specify number of quantizers
         #     codebook_size=1024,  # codebook size
         # ).to('cuda')
+
+        self.residual_vq = ResidualVQ(
+            dim=text_embed.weight.data.shape[1],
+            codebook_size=text_embed.weight.data.shape[0],
+            num_quantizers=4,
+            shared_codebook=True,
+            # kmeans_init=True,  # set to True
+            # kmeans_iters=10  # number of kmeans iterations to calculate the centroids for the codebook on init
+        ).to('cuda')
+
+        for layer in self.residual_vq.layers:
+           layer.codebook = text_embed.weight.data
 
 
 class TextEmbedding(nn.Module):
