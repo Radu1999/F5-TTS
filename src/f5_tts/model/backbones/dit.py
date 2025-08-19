@@ -49,7 +49,7 @@ class LanguageModule(nn.Module):
         self.pre_proj = None
         self.residual_vq = None
 
-    def forward(self, text: int["b nt"], seq_len, drop_text=False, global_update=None, inference=False,
+    def forward(self, text: int["b nt"], seq_len, drop_text=False, inference=False,
                 step=None):  # noqa: F722
         if isinstance(text, list):
             text = list_str_to_idx(text, self.vocab_char_map).to('cuda')
@@ -70,13 +70,12 @@ class LanguageModule(nn.Module):
         # text = F.layer_norm(text, text.shape[-1:])
         text_proj = self.pre_proj(text)
 
-
-        if  global_update is not None and global_update < 2000:
-            # ground_embeds = self.codebook(source_text)
-            # ground_embeds = ground_embeds.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, ground_embeds.size(-1)),
-            #                                           0.0)
-            # loss = F.mse_loss(text_proj, ground_embeds, reduction="mean")
-            return text_proj, None, None
+        if self.codebook is not None and step is not None and step < 2000:
+            ground_embeds = self.codebook(source_text)
+            ground_embeds = ground_embeds.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, ground_embeds.size(-1)),
+                                                      0.0)
+            loss = F.mse_loss(text_proj, ground_embeds, reduction="mean") * 10
+            return text_proj, loss, None
 
         z_q, encoding_indices, loss = self.residual_vq(text_proj, freeze_codebook=True)
         z_q = z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
@@ -128,7 +127,7 @@ class LanguageModule(nn.Module):
         ).to('cuda')
 
         for layer in self.residual_vq.layers:
-           layer.codebook = text_embed.weight.data
+            layer.codebook = text_embed.weight.data
 
 
 class TextEmbedding(nn.Module):
