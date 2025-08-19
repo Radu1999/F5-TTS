@@ -56,12 +56,12 @@ class LanguageModule(nn.Module):
         text = text + 1  # use 0 as filler token. preprocess of batch pad -1, see list_str_to_idx()
         text = text[:, :seq_len]  # curtail if character tokens are more than the mel spec tokens
         batch, text_len = text.shape[0], text.shape[1]
-        text = F.pad(text, (0, seq_len - text_len), value=0)
+        source_text = F.pad(text, (0, seq_len - text_len), value=0)
 
         if self.mask_padding:
-            text_mask = text == 0
+            text_mask = source_text == 0
 
-        text = self.text_embed(text)
+        text = self.text_embed(source_text)
         text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
         for block in self.text_blocks:
             text = block(text)
@@ -71,13 +71,13 @@ class LanguageModule(nn.Module):
 
         z_q, encoding_indices, loss = self.residual_vq(text_proj, freeze_codebook=True)
         z_q = z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
-        if self.training and step is not None and step < 10000:
-            out = text
-        else:
 
-            out = z_q  # always use VQ after warmup
+        if self.codebook is not None:
+            ground_embeds = self.codebook(source_text)
+            ground_embeds = ground_embeds.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, ground_embeds.size(-1)), 0.0)
+            loss += F.mse_loss(text_proj, ground_embeds)
 
-        return out, loss.mean(), encoding_indices
+        return z_q, loss.mean(), encoding_indices
 
     def build_vq(self, text_embed: nn.Embedding):
         self.vq_layer = VQEmbedding(embedding=text_embed, embedding_dim=text_embed.weight.shape[1]).to('cuda')
