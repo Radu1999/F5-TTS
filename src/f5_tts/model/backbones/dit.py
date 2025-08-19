@@ -67,9 +67,7 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
-        text = F.layer_norm(text, text.shape[-1:])
-        text_proj = self.pre_proj(text)
-
+        text_proj = text
 
         if self.codebook is not None and global_update is not None and global_update < 2000:
             ground_embeds = self.codebook(source_text)
