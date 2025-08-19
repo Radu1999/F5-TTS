@@ -69,7 +69,7 @@ class LanguageModule(nn.Module):
 
         text_proj = self.pre_proj(text)
 
-        if self.codebook is not None and global_update is not None and global_update < 10000:
+        if self.codebook is not None and global_update is not None and global_update < 2000:
             ground_embeds = self.codebook(source_text)
             ground_embeds = ground_embeds.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, ground_embeds.size(-1)),
                                                       0.0)
