@@ -67,13 +67,15 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
-        text_proj = text
+        # text = F.layer_norm(text, text.shape[-1:])
+        text_proj = self.pre_proj(text)
 
-        if self.codebook is not None and global_update is not None and global_update < 2000:
-            ground_embeds = self.codebook(source_text)
-            ground_embeds = ground_embeds.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, ground_embeds.size(-1)),
-                                                      0.0)
-            loss = F.mse_loss(text_proj, ground_embeds, reduction="mean")
+
+        if  global_update is not None and global_update < 2000:
+            # ground_embeds = self.codebook(source_text)
+            # ground_embeds = ground_embeds.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, ground_embeds.size(-1)),
+            #                                           0.0)
+            # loss = F.mse_loss(text_proj, ground_embeds, reduction="mean")
             return text_proj, None, None
 
         z_q, encoding_indices, loss = self.residual_vq(text_proj, freeze_codebook=True)
