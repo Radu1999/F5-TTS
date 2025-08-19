@@ -73,7 +73,7 @@ class LanguageModule(nn.Module):
             ground_embeds = self.codebook(source_text)
             ground_embeds = ground_embeds.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, ground_embeds.size(-1)),
                                                       0.0)
-            loss = F.mse_loss(text_proj, ground_embeds, reduction="mean") * 10
+            loss = F.mse_loss(text_proj, ground_embeds, reduction="mean")
             return text_proj, loss, None
 
         z_q, encoding_indices, loss = self.residual_vq(text_proj, freeze_codebook=True)
