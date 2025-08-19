@@ -15,6 +15,11 @@ from torch import nn
 from x_transformers.x_transformers import RotaryEmbedding
 from transformers import AutoModel, AutoTokenizer
 from vector_quantize_pytorch import ResidualSimVQ, VectorQuantize, ResidualVQ, SimVQ
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+from sklearn.decomposition import PCA
+import os
 
 from f5_tts.model.modules import (
     AdaLayerNorm_Final,
@@ -67,67 +72,136 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
-        # text = F.layer_norm(text, text.shape[-1:])
-        text_proj = self.pre_proj(text)
-
-        if self.codebook is not None and step is not None and step < 2000:
-            ground_embeds = self.codebook(source_text)
-            ground_embeds = ground_embeds.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, ground_embeds.size(-1)),
-                                                      0.0)
-            loss = F.mse_loss(text_proj, ground_embeds, reduction="mean") * 10
-            return text_proj, loss, None
-
-        z_q, encoding_indices, loss = self.residual_vq(text_proj, freeze_codebook=True)
+        z_q, encoding_indices, loss = self.residual_vq(text)
         z_q = z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
         return z_q, loss.mean(), encoding_indices
 
     def build_vq(self, text_embed: nn.Embedding):
-        self.vq_layer = VQEmbedding(embedding=text_embed, embedding_dim=text_embed.weight.shape[1]).to('cuda')
-        self.codebook = text_embed
-
-        def init_f(codebook):
-            return text_embed.weight.data
-
-        # self.residual_vq = VectorQuantize(
-        #     dim=text_embed.weight.data.shape[1],
-        #     codebook_size=text_embed.weight.data.shape[0],
-        #     decay=0.8,
-        #     commitment_weight=1.,
-        #     rotation_trick=True,
-        #     freeze_codebook=True,
-        # ).to('cuda')
-
-        # self.residual_vq = SimVQ(
-        #     dim=text_embed.weight.data.shape[1],
-        #     codebook_size=text_embed.weight.data.shape[0],
-        #     rotation_trick=True,
-        #     init_fn=init_f
-        # ).to('cuda')
-
-        # self.residual_vq.codebook = text_embed.weight.data
-
-        # self.residual_vq = ResidualSimVQ(
-        #     dim=512,
-        #     num_quantizers=8,  # specify number of quantizers
-        #     codebook_size=1024,  # codebook size
-        # ).to('cuda')
-
-        self.pre_proj = nn.Sequential(
-            nn.Linear(text_embed.weight.data.shape[1], text_embed.weight.data.shape[1], bias=False),
-        ).to('cuda')
-
         self.residual_vq = ResidualVQ(
             dim=text_embed.weight.data.shape[1],
-            codebook_size=text_embed.weight.data.shape[0],
+            codebook_size=32,
             num_quantizers=4,
-            shared_codebook=True,
-            # kmeans_init=True,  # set to True
-            # kmeans_iters=10  # number of kmeans iterations to calculate the centroids for the codebook on init
         ).to('cuda')
 
-        for layer in self.residual_vq.layers:
-            layer.codebook = text_embed.weight.data
+
+    def visualize_text_embed_weights(self, weights_data):
+        """
+        Visualize text embedding weights with multiple visualization types
+        Args:
+            weights_data: tensor of shape (vocab_size, embedding_dim)
+        """
+        # Convert to numpy for visualization
+        weights_np = weights_data.detach().cpu().numpy()
+        vocab_size, embedding_dim = weights_np.shape
+        
+        # Create output directory for visualizations
+        os.makedirs("text_embed_visualizations", exist_ok=True)
+        
+        # Set up the visualization style
+        plt.style.use('default')
+        sns.set_palette("husl")
+        
+        # 1. Weight Distribution Histogram
+        plt.figure(figsize=(12, 8))
+        plt.subplot(2, 3, 1)
+        plt.hist(weights_np.flatten(), bins=50, alpha=0.7, density=True)
+        plt.title('Distribution of Embedding Weights')
+        plt.xlabel('Weight Value')
+        plt.ylabel('Density')
+        plt.grid(True, alpha=0.3)
+        
+        # 2. Heatmap of embedding weights (sampled if too large)
+        plt.subplot(2, 3, 2)
+        # Sample embeddings if vocabulary is too large for visualization
+        max_vocab_display = 100
+        if vocab_size > max_vocab_display:
+            indices = np.linspace(0, vocab_size-1, max_vocab_display, dtype=int)
+            weights_sample = weights_np[indices]
+            title_suffix = f" (sampled {max_vocab_display}/{vocab_size})"
+        else:
+            weights_sample = weights_np
+            title_suffix = ""
+        
+        sns.heatmap(weights_sample, cmap='RdBu_r', center=0, 
+                   cbar_kws={'label': 'Weight Value'})
+        plt.title(f'Embedding Weights Heatmap{title_suffix}')
+        plt.xlabel('Embedding Dimension')
+        plt.ylabel('Vocabulary Index')
+        
+        # 3. Statistics per embedding dimension
+        plt.subplot(2, 3, 3)
+        dim_means = np.mean(weights_np, axis=0)
+        dim_stds = np.std(weights_np, axis=0)
+        x_dims = np.arange(embedding_dim)
+        
+        plt.plot(x_dims, dim_means, label='Mean', alpha=0.8)
+        plt.fill_between(x_dims, dim_means - dim_stds, dim_means + dim_stds, 
+                        alpha=0.3, label='±1 std')
+        plt.title('Statistics per Embedding Dimension')
+        plt.xlabel('Dimension Index')
+        plt.ylabel('Weight Value')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        
+        # 4. L2 norms of embeddings
+        plt.subplot(2, 3, 4)
+        l2_norms = np.linalg.norm(weights_np, axis=1)
+        plt.hist(l2_norms, bins=30, alpha=0.7)
+        plt.title('L2 Norms of Embeddings')
+        plt.xlabel('L2 Norm')
+        plt.ylabel('Frequency')
+        plt.grid(True, alpha=0.3)
+        
+        # 5. PCA Visualization (if embedding_dim > 2)
+        plt.subplot(2, 3, 5)
+        if embedding_dim > 2:
+            pca = PCA(n_components=2)
+            weights_pca = pca.fit_transform(weights_np)
+            plt.scatter(weights_pca[:, 0], weights_pca[:, 1], alpha=0.6, s=20)
+            plt.title(f'PCA Visualization\n(Explained variance: {pca.explained_variance_ratio_.sum():.3f})')
+            plt.xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.3f})')
+            plt.ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.3f})')
+        else:
+            plt.scatter(weights_np[:, 0], weights_np[:, 1] if embedding_dim > 1 else np.zeros_like(weights_np[:, 0]))
+            plt.title('2D Embedding Visualization')
+            plt.xlabel('Dimension 1')
+            plt.ylabel('Dimension 2' if embedding_dim > 1 else 'Zero')
+        plt.grid(True, alpha=0.3)
+        
+        # 6. Summary statistics
+        plt.subplot(2, 3, 6)
+        stats_text = f"""
+        Embedding Statistics:
+        
+        Shape: {vocab_size} × {embedding_dim}
+        Mean: {np.mean(weights_np):.4f}
+        Std: {np.std(weights_np):.4f}
+        Min: {np.min(weights_np):.4f}
+        Max: {np.max(weights_np):.4f}
+        
+        Per-token L2 norm:
+        Mean: {np.mean(l2_norms):.4f}
+        Std: {np.std(l2_norms):.4f}
+        """
+        plt.text(0.1, 0.5, stats_text, fontsize=10, verticalalignment='center',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.5))
+        plt.axis('off')
+        plt.title('Summary Statistics')
+        
+        plt.tight_layout()
+        plt.savefig('text_embed_visualizations/text_embed_weights_analysis.png', 
+                   dpi=300, bbox_inches='tight')
+        plt.savefig('text_embed_visualizations/text_embed_weights_analysis.pdf', 
+                   bbox_inches='tight')
+        
+        print(f"✅ Text embedding visualization saved to 'text_embed_visualizations/' directory")
+        print(f"   - Embedding shape: {vocab_size} × {embedding_dim}")
+        print(f"   - Weight statistics: mean={np.mean(weights_np):.4f}, std={np.std(weights_np):.4f}")
+        print(f"   - L2 norm statistics: mean={np.mean(l2_norms):.4f}, std={np.std(l2_norms):.4f}")
+        
+        # Optional: Close the plot to free memory
+        plt.close()
 
 
 class TextEmbedding(nn.Module):
