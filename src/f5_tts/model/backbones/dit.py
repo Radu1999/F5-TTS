@@ -113,9 +113,7 @@ class LanguageModule(nn.Module):
         # ).to('cuda')
 
         self.pre_proj = nn.Sequential(
-            nn.Linear(text_embed.weight.data.shape[1], 2 * text_embed.weight.data.shape[1], bias=False),
-            nn.GELU(),
-            nn.Linear(text_embed.weight.data.shape[1] * 2, text_embed.weight.data.shape[1], bias=False)
+            nn.Linear(text_embed.weight.data.shape[1], text_embed.weight.data.shape[1], bias=False),
         ).to('cuda')
 
         self.residual_vq = ResidualVQ(
