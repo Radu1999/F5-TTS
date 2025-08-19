@@ -16,7 +16,7 @@ from x_transformers.x_transformers import RotaryEmbedding
 from transformers import AutoModel, AutoTokenizer
 from vector_quantize_pytorch import ResidualSimVQ, VectorQuantize, ResidualVQ, SimVQ
 import matplotlib.pyplot as plt
-import seaborn as sns
+# import seaborn as sns
 import numpy as np
 from sklearn.decomposition import PCA
 import os
