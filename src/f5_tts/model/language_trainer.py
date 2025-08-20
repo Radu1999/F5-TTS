@@ -158,7 +158,7 @@ class Trainer:
         self.accelerator.wait_for_everyone()
         if self.is_main:
             checkpoint = dict(
-                language_module_state_dict=self.accelerator.unwrap_model(self.model).state_dict(),
+                model_state_dict=self.accelerator.unwrap_model(self.model).state_dict(),
                 optimizer_state_dict=self.optimizer.state_dict(),
                 scheduler_state_dict=self.scheduler.state_dict(),
                 update=update,
