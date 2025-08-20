@@ -396,6 +396,7 @@ def infer_process(
     speed=speed,
     fix_duration=fix_duration,
     device=device,
+    language_module=None
 ):
     # Split the input text into batches
     audio, sr = torchaudio.load(ref_audio)
@@ -423,6 +424,7 @@ def infer_process(
             speed=speed,
             fix_duration=fix_duration,
             device=device,
+            language_module=language_module
         )
     )
 
@@ -448,6 +450,7 @@ def infer_batch_process(
     device=None,
     streaming=False,
     chunk_size=2048,
+    language_module=None,
 ):
     audio, sr = ref_audio
     if audio.shape[0] > 1:
@@ -494,6 +497,7 @@ def infer_batch_process(
                 steps=nfe_step,
                 cfg_strength=cfg_strength,
                 sway_sampling_coef=sway_sampling_coef,
+                language_module=language_module
             )
             del _
 

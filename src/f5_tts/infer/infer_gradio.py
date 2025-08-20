@@ -18,7 +18,7 @@ import torch
 import torchaudio
 from cached_path import cached_path
 from transformers import AutoModelForCausalLM, AutoTokenizer
-
+from f5_tts.model.backbones.dit import LanguageModule
 
 try:
     import spaces
@@ -75,6 +75,7 @@ def load_e2tts():
 
 
 def load_custom(ckpt_path: str, vocab_path="", model_cfg=None):
+    ckpt_path = r'C:\Users\Mihaitza\Desktop\F5-TTS\ckpts\ro_tts\pretrained_model_1250000.safetensors'
     ckpt_path, vocab_path = ckpt_path.strip(), vocab_path.strip()
     if ckpt_path.startswith("hf://"):
         ckpt_path = str(cached_path(ckpt_path))
@@ -84,7 +85,7 @@ def load_custom(ckpt_path: str, vocab_path="", model_cfg=None):
         model_cfg = json.loads(DEFAULT_TTS_MODEL_CFG[2])
     elif isinstance(model_cfg, str):
         model_cfg = json.loads(model_cfg)
-    return load_model(DiT, model_cfg, ckpt_path, vocab_file=vocab_path, use_ema=False)
+    return load_model(DiT, model_cfg, ckpt_path, vocab_file=vocab_path, use_ema=True)
 
 
 F5TTS_ema_model = load_f5tts()
@@ -176,6 +177,14 @@ def infer(
             pre_custom_path = model[1]
         ema_model = custom_ema_model
 
+    ema_model = ema_model.float()
+    language_module = LanguageModule(text_dim=512, text_num_embeds=len(ema_model.vocab_char_map), conv_layers=4,
+                                     vocab_char_map=ema_model.vocab_char_map).to('cuda')
+
+    language_module.build_vq(ema_model.transformer.text_embed.text_embed)
+    checkpoint = torch.load(model[1].strip())
+    language_module.load_state_dict(checkpoint['language_module_state_dict'])
+
     final_wave, final_sample_rate, combined_spectrogram = infer_process(
         ref_audio,
         ref_text,
@@ -187,6 +196,7 @@ def infer(
         speed=speed,
         show_info=show_info,
         progress=gr.Progress(),
+        language_module=language_module
     )
 
     # Remove silence

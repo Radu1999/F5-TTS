@@ -82,6 +82,9 @@ class LanguageModule(nn.Module):
             dim=text_embed.weight.data.shape[1],
             codebook_size=16,
             num_quantizers=4,
+            kmeans_init=True,
+            kmeans_iters=10,
+            rotation_trick=True,
         ).to('cuda')
 
 
