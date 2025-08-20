@@ -81,7 +81,6 @@ class LanguageModule(nn.Module):
         self.residual_vq = ResidualVQ(
             dim=text_embed.weight.data.shape[1],
             codebook_size=32,
-            codebook_size=32,
             num_quantizers=4,
         ).to('cuda')
 
