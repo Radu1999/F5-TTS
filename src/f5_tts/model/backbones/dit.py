@@ -80,10 +80,16 @@ class LanguageModule(nn.Module):
     def build_vq(self, text_embed: nn.Embedding):
         self.residual_vq = ResidualVQ(
             dim=text_embed.weight.data.shape[1],
-            codebook_size=32,
+            codebook_size=16,
             num_quantizers=4,
         ).to('cuda')
 
+        self.residual_vq = VectorQuantize(
+            dim=256,
+            codebook_size=512,
+            decay=0.8,
+            commitment_weight=1.
+        ).to('cuda')
 
     def visualize_text_embed_weights(self, weights_data):
         """
@@ -94,14 +100,14 @@ class LanguageModule(nn.Module):
         # Convert to numpy for visualization
         weights_np = weights_data.detach().cpu().numpy()
         vocab_size, embedding_dim = weights_np.shape
-        
+
         # Create output directory for visualizations
         os.makedirs("text_embed_visualizations", exist_ok=True)
-        
+
         # Set up the visualization style
         plt.style.use('default')
         sns.set_palette("husl")
-        
+
         # 1. Weight Distribution Histogram
         plt.figure(figsize=(12, 8))
         plt.subplot(2, 3, 1)
@@ -110,7 +116,7 @@ class LanguageModule(nn.Module):
         plt.xlabel('Weight Value')
         plt.ylabel('Density')
         plt.grid(True, alpha=0.3)
-        
+
         # 2. Heatmap of embedding weights (sampled if too large)
         plt.subplot(2, 3, 2)
         # Sample embeddings if vocabulary is too large for visualization
@@ -122,28 +128,28 @@ class LanguageModule(nn.Module):
         else:
             weights_sample = weights_np
             title_suffix = ""
-        
-        sns.heatmap(weights_sample, cmap='RdBu_r', center=0, 
+
+        sns.heatmap(weights_sample, cmap='RdBu_r', center=0,
                    cbar_kws={'label': 'Weight Value'})
         plt.title(f'Embedding Weights Heatmap{title_suffix}')
         plt.xlabel('Embedding Dimension')
         plt.ylabel('Vocabulary Index')
-        
+
         # 3. Statistics per embedding dimension
         plt.subplot(2, 3, 3)
         dim_means = np.mean(weights_np, axis=0)
         dim_stds = np.std(weights_np, axis=0)
         x_dims = np.arange(embedding_dim)
-        
+
         plt.plot(x_dims, dim_means, label='Mean', alpha=0.8)
-        plt.fill_between(x_dims, dim_means - dim_stds, dim_means + dim_stds, 
+        plt.fill_between(x_dims, dim_means - dim_stds, dim_means + dim_stds,
                         alpha=0.3, label='±1 std')
         plt.title('Statistics per Embedding Dimension')
         plt.xlabel('Dimension Index')
         plt.ylabel('Weight Value')
         plt.legend()
         plt.grid(True, alpha=0.3)
-        
+
         # 4. L2 norms of embeddings
         plt.subplot(2, 3, 4)
         l2_norms = np.linalg.norm(weights_np, axis=1)
@@ -152,7 +158,7 @@ class LanguageModule(nn.Module):
         plt.xlabel('L2 Norm')
         plt.ylabel('Frequency')
         plt.grid(True, alpha=0.3)
-        
+
         # 5. PCA Visualization (if embedding_dim > 2)
         plt.subplot(2, 3, 5)
         if embedding_dim > 2:
@@ -168,7 +174,7 @@ class LanguageModule(nn.Module):
             plt.xlabel('Dimension 1')
             plt.ylabel('Dimension 2' if embedding_dim > 1 else 'Zero')
         plt.grid(True, alpha=0.3)
-        
+
         # 6. Summary statistics
         plt.subplot(2, 3, 6)
         stats_text = f"""
@@ -188,18 +194,18 @@ class LanguageModule(nn.Module):
                 bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.5))
         plt.axis('off')
         plt.title('Summary Statistics')
-        
+
         plt.tight_layout()
-        plt.savefig('text_embed_visualizations/text_embed_weights_analysis.png', 
+        plt.savefig('text_embed_visualizations/text_embed_weights_analysis.png',
                    dpi=300, bbox_inches='tight')
-        plt.savefig('text_embed_visualizations/text_embed_weights_analysis.pdf', 
+        plt.savefig('text_embed_visualizations/text_embed_weights_analysis.pdf',
                    bbox_inches='tight')
-        
+
         print(f"✅ Text embedding visualization saved to 'text_embed_visualizations/' directory")
         print(f"   - Embedding shape: {vocab_size} × {embedding_dim}")
         print(f"   - Weight statistics: mean={np.mean(weights_np):.4f}, std={np.std(weights_np):.4f}")
         print(f"   - L2 norm statistics: mean={np.mean(l2_norms):.4f}, std={np.std(l2_norms):.4f}")
-        
+
         # Optional: Close the plot to free memory
         plt.close()
 
@@ -341,6 +347,13 @@ class DiT(nn.Module):
 
         self.checkpoint_activations = checkpoint_activations
 
+        self.vq = VectorQuantize(
+            dim=512,
+            codebook_size=512,
+            decay=0.8,
+            commitment_weight=1.
+        ).to('cuda')
+
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -386,9 +399,10 @@ class DiT(nn.Module):
         else:
             text_embed = self.text_embed(text, seq_len, drop_text=drop_text, text_embed=text_embed)
 
+        text_embed, encoding_indices, loss = self.vq(text_embed)
         x = self.input_embed(x, cond, text_embed, drop_audio_cond=drop_audio_cond)
 
-        return x
+        return x, loss
 
     def clear_cache(self):
         self.text_cond, self.text_uncond = None, None
@@ -413,15 +427,16 @@ class DiT(nn.Module):
         # t: conditioning time, text: text, x: noised audio + cond audio + text
         t = self.time_embed(time)
         if cfg_infer:  # pack cond & uncond forward: b n d -> 2b n d
-            x_cond = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False, text_embed=text_embed,
+            x_cond, loss1 = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False, text_embed=text_embed,
                                           cache=cache)
-            x_uncond = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True, text_embed=text_embed,
+            x_uncond, loss2 = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True, text_embed=text_embed,
                                             cache=cache)
             x = torch.cat((x_cond, x_uncond), dim=0)
             t = torch.cat((t, t), dim=0)
             mask = torch.cat((mask, mask), dim=0) if mask is not None else None
+            vq_loss = loss1 + loss2
         else:
-            x = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond, drop_text=drop_text, cache=cache,
+            x, vq_loss = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond, drop_text=drop_text, cache=cache,
                                      text_embed=text_embed)
 
         rope = self.rotary_embed.forward_from_seq_len(seq_len)
@@ -442,4 +457,4 @@ class DiT(nn.Module):
         x = self.norm_out(x, t)
         output = self.proj_out(x)
 
-        return output
+        return output, vq_loss

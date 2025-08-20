@@ -194,9 +194,14 @@ def main():
     for p in model.parameters():
         p.requires_grad = False
 
+
+
     # unfreeze text embeddings
-    # for p in model.transformer.text_embed.parameters():
-    #     p.requires_grad = True
+    for p in model.transformer.text_embed.parameters():
+        p.requires_grad = True
+
+    for p in model.transformer.vq.parameters():
+        p.requires_grad = True
 
     language_module = LanguageModule(text_dim=512, text_num_embeds=vocab_size, conv_layers=4, vocab_char_map=model.vocab_char_map)
     print(model.vocab_char_map)

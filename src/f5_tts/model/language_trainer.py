@@ -145,10 +145,10 @@ class Trainer:
         if bnb_optimizer:
             import bitsandbytes as bnb
 
-            self.optimizer = bnb.optim.AdamW8bit(language_module.parameters(), lr=learning_rate)
+            self.optimizer = bnb.optim.AdamW8bit(model.parameters(), lr=learning_rate)
         else:
-            self.optimizer = AdamW(language_module.parameters(), lr=learning_rate)
-        self.language_module, self.optimizer = self.accelerator.prepare(self.language_module, self.optimizer)
+            self.optimizer = AdamW(model.parameters(), lr=learning_rate)
+        self.model, self.optimizer = self.accelerator.prepare(self.model, self.optimizer)
 
     @property
     def is_main(self):
@@ -158,7 +158,7 @@ class Trainer:
         self.accelerator.wait_for_everyone()
         if self.is_main:
             checkpoint = dict(
-                language_module_state_dict=self.accelerator.unwrap_model(self.language_module).state_dict(),
+                language_module_state_dict=self.accelerator.unwrap_model(self.model).state_dict(),
                 optimizer_state_dict=self.optimizer.state_dict(),
                 scheduler_state_dict=self.scheduler.state_dict(),
                 update=update,
@@ -224,18 +224,18 @@ class Trainer:
                     del checkpoint["ema_model_state_dict"][key]
 
             if self.is_main:
-                self.ema_model.load_state_dict(checkpoint["ema_model_state_dict"])
+                self.ema_model.load_state_dict(checkpoint["ema_model_state_dict"], strict=False)
 
             model_state_dict = {
                 k.replace("ema_model.", ""): v
                 for k, v in checkpoint["ema_model_state_dict"].items()
                 if k not in ["initted", "update", "step"]
             }
-            self.accelerator.unwrap_model(self.model).load_state_dict(model_state_dict)
+            self.accelerator.unwrap_model(self.model).load_state_dict(model_state_dict, strict=False)
             del checkpoint
             gc.collect()
 
-        self.language_module.build_vq(self.model.transformer.text_embed.text_embed)
+        # self.language_module.build_vq(self.model.transformer.text_embed.text_embed)
 
         update = 0
         if "model_last.pt" in os.listdir(self.checkpoint_path):
@@ -255,8 +255,8 @@ class Trainer:
             checkpoint = torch.load(f"{self.checkpoint_path}/{latest_checkpoint}", weights_only=True,
                                     map_location="cpu")
 
-            self.accelerator.unwrap_model(self.language_module).load_state_dict(
-                checkpoint["language_module_state_dict"])
+            self.accelerator.unwrap_model(self.model).load_state_dict(
+                checkpoint["model_state_dict"])
             self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
             if self.scheduler:
                 self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
@@ -376,7 +376,7 @@ class Trainer:
             )
 
             for batch in current_dataloader:
-                with self.accelerator.accumulate(self.language_module):
+                with self.accelerator.accumulate(self.model):
                     text_inputs = batch["text"]
                     mel_spec = batch["mel"].permute(0, 2, 1)
                     mel_lengths = batch["mel_lengths"]
@@ -386,7 +386,7 @@ class Trainer:
                         dur_loss = self.duration_predictor(mel_spec, lens=batch.get("durations"))
                         self.accelerator.log({"duration loss": dur_loss.item()}, step=global_update)
 
-                    text_embed, loss_vq, encoding_indices = self.language_module(text=text_inputs, seq_len=mel_spec.shape[1], step=global_update)
+                    text_embed, loss_vq, encoding_indices = None, None, None # self.language_module(text=text_inputs, seq_len=mel_spec.shape[1], step=global_update)
 
                     if encoding_indices is not None:
                         all_encoding_indices.append(encoding_indices.detach())
@@ -404,14 +404,14 @@ class Trainer:
 
                     if self.log_gradients and self.accelerator.is_local_main_process and self.accelerator.sync_gradients:
                         total_grad_norm = 0.0
-                        for p in self.language_module.parameters():
+                        for p in self.model.parameters():
                             if p.grad is not None:
                                 total_grad_norm += p.grad.detach().data.norm(2).item() ** 2
                         total_grad_norm = total_grad_norm ** 0.5
                         self.accelerator.log({"train/total_grad_norm": total_grad_norm}, step=global_update)
 
                     if self.max_grad_norm > 0 and self.accelerator.sync_gradients:
-                        self.accelerator.clip_grad_norm_(self.language_module.parameters(), self.max_grad_norm)
+                        self.accelerator.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
 
                     self.optimizer.step()
                     self.scheduler.step()

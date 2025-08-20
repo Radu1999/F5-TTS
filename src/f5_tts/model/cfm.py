@@ -165,7 +165,7 @@ class CFM(nn.Module):
             # step_cond = torch.where(cond_mask, cond, torch.zeros_like(cond))
 
             # predict flow (cond)
-            text_embeds, _, _= language_module(text, step=step, seq_len=x.shape[1], inference=True) if language_module is not None else (None, None, None)
+            text_embeds, _, _= None, None, None # language_module(text, step=step, seq_len=x.shape[1], inference=True) if language_module is not None else (None, None, None)
             if cfg_strength < 1e-5:
                 pred = self.transformer(
                     x=x,
@@ -181,7 +181,7 @@ class CFM(nn.Module):
                 return pred
 
             # predict flow (cond and uncond), for classifier-free guidance
-            pred_cfg = self.transformer(
+            pred_cfg, _ = self.transformer(
                 x=x,
                 cond=step_cond,
                 text=text,
@@ -298,7 +298,7 @@ class CFM(nn.Module):
         # apply mask will use more memory; might adjust batchsize or batchsampler long sequence threshold
         drop_text = False
         drop_audio_cond = False
-        pred = self.transformer(
+        pred, vq_loss = self.transformer(
             x=φ, cond=cond, text=text, time=time, drop_audio_cond=drop_audio_cond, drop_text=drop_text, mask=mask, text_embed=text_embed
         )
 
@@ -306,4 +306,4 @@ class CFM(nn.Module):
         loss = F.mse_loss(pred, flow, reduction="none")
         loss = loss[rand_span_mask]
 
-        return loss.mean(), cond, pred
+        return loss.mean() + vq_loss, cond, pred
