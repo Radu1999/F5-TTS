@@ -89,7 +89,6 @@ class CFM(nn.Module):
         lens: int["b"] | None = None,  # noqa: F821
         steps=32,
         cfg_strength=1.0,
-        language_module=None,
         sway_sampling_coef=None,
         seed: int | None = None,
         max_duration=4096,
@@ -165,13 +164,11 @@ class CFM(nn.Module):
             # step_cond = torch.where(cond_mask, cond, torch.zeros_like(cond))
 
             # predict flow (cond)
-            text_embeds, _, _= None, None, None # language_module(text, step=step, seq_len=x.shape[1], inference=True) if language_module is not None else (None, None, None)
             if cfg_strength < 1e-5:
                 pred = self.transformer(
                     x=x,
                     cond=step_cond,
                     text=text,
-                    text_embed=text_embeds,
                     time=t,
                     mask=mask,
                     drop_audio_cond=False,
@@ -187,7 +184,6 @@ class CFM(nn.Module):
                 text=text,
                 time=t,
                 mask=mask,
-                text_embed=text_embeds,
                 cfg_infer=True,
                 cache=True,
             )
@@ -306,4 +302,4 @@ class CFM(nn.Module):
         loss = F.mse_loss(pred, flow, reduction="none")
         loss = loss[rand_span_mask]
 
-        return loss.mean() + vq_loss, cond, pred
+        return loss.mean(), vq_loss, cond, pred

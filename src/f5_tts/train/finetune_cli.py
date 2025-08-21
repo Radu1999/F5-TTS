@@ -203,14 +203,10 @@ def main():
     for p in model.transformer.vq.parameters():
         p.requires_grad = True
 
-    language_module = LanguageModule(text_dim=512, text_num_embeds=vocab_size, conv_layers=4, vocab_char_map=model.vocab_char_map)
-    print(model.vocab_char_map)
-
     trainer = Trainer(
         model,
         args.epochs,
         args.learning_rate,
-        language_module=language_module,
         num_warmup_updates=args.num_warmup_updates,
         save_per_updates=args.save_per_updates,
         keep_last_n_checkpoints=args.keep_last_n_checkpoints,

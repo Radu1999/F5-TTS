@@ -35,7 +35,6 @@ class Trainer:
             epochs,
             learning_rate,
             num_warmup_updates=20000,
-            language_module: LanguageModule = None,
             save_per_updates=1000,
             keep_last_n_checkpoints: int = -1,
             # -1 to keep all, 0 to not save intermediate, > 0 to keep last N checkpoints
@@ -141,7 +140,6 @@ class Trainer:
         self.noise_scheduler = noise_scheduler
 
         self.duration_predictor = duration_predictor
-        self.language_module = language_module
         if bnb_optimizer:
             import bitsandbytes as bnb
 
@@ -235,8 +233,6 @@ class Trainer:
             del checkpoint
             gc.collect()
 
-        # self.language_module.build_vq(self.model.transformer.text_embed.text_embed)
-
         update = 0
         if "model_last.pt" in os.listdir(self.checkpoint_path):
             latest_checkpoint = "model_last.pt"
@@ -251,7 +247,7 @@ class Trainer:
                 latest_checkpoint = None
 
         if latest_checkpoint:
-            print(f"Resuming language_module training from {latest_checkpoint}")
+            print(f"Resuming model training from {latest_checkpoint}")
             checkpoint = torch.load(f"{self.checkpoint_path}/{latest_checkpoint}", weights_only=True,
                                     map_location="cpu")
 
@@ -386,14 +382,8 @@ class Trainer:
                         dur_loss = self.duration_predictor(mel_spec, lens=batch.get("durations"))
                         self.accelerator.log({"duration loss": dur_loss.item()}, step=global_update)
 
-                    text_embed, loss_vq, encoding_indices = None, None, None # self.language_module(text=text_inputs, seq_len=mel_spec.shape[1], step=global_update)
-
-                    if encoding_indices is not None:
-                        all_encoding_indices.append(encoding_indices.detach())
-
-                    loss, cond, pred = self.model(
-                        mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler,
-                        text_embed=text_embed,
+                    loss, loss_vq, cond, pred = self.model(
+                        mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler
                     )
 
                     if loss_vq is not None:
@@ -448,7 +438,6 @@ class Trainer:
                                 steps=nfe_step,
                                 cfg_strength=cfg_strength,
                                 sway_sampling_coef=sway_sampling_coef,
-                                language_module=self.language_module,
                                 step=None,
                             )
                             generated = generated.to(torch.float32)
@@ -486,7 +475,6 @@ class Trainer:
                                 steps=nfe_step,
                                 cfg_strength=cfg_strength,
                                 sway_sampling_coef=sway_sampling_coef,
-                                language_module=self.language_module,
                                 step=None
                             )
                             generated = generated.to(torch.float32)
