@@ -122,7 +122,7 @@ class LanguageModule(nn.Module):
         # Sample embeddings if vocabulary is too large for visualization
         max_vocab_display = 100
         if vocab_size > max_vocab_display:
-            indices = np.linspace(0, vocab_size-1, max_vocab_display, dtype=int)
+            indices = np.linspace(0, vocab_size - 1, max_vocab_display, dtype=int)
             weights_sample = weights_np[indices]
             title_suffix = f" (sampled {max_vocab_display}/{vocab_size})"
         else:
@@ -130,7 +130,7 @@ class LanguageModule(nn.Module):
             title_suffix = ""
 
         sns.heatmap(weights_sample, cmap='RdBu_r', center=0,
-                   cbar_kws={'label': 'Weight Value'})
+                    cbar_kws={'label': 'Weight Value'})
         plt.title(f'Embedding Weights Heatmap{title_suffix}')
         plt.xlabel('Embedding Dimension')
         plt.ylabel('Vocabulary Index')
@@ -143,7 +143,7 @@ class LanguageModule(nn.Module):
 
         plt.plot(x_dims, dim_means, label='Mean', alpha=0.8)
         plt.fill_between(x_dims, dim_means - dim_stds, dim_means + dim_stds,
-                        alpha=0.3, label='±1 std')
+                         alpha=0.3, label='±1 std')
         plt.title('Statistics per Embedding Dimension')
         plt.xlabel('Dimension Index')
         plt.ylabel('Weight Value')
@@ -191,15 +191,15 @@ class LanguageModule(nn.Module):
         Std: {np.std(l2_norms):.4f}
         """
         plt.text(0.1, 0.5, stats_text, fontsize=10, verticalalignment='center',
-                bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.5))
+                 bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.5))
         plt.axis('off')
         plt.title('Summary Statistics')
 
         plt.tight_layout()
         plt.savefig('text_embed_visualizations/text_embed_weights_analysis.png',
-                   dpi=300, bbox_inches='tight')
+                    dpi=300, bbox_inches='tight')
         plt.savefig('text_embed_visualizations/text_embed_weights_analysis.pdf',
-                   bbox_inches='tight')
+                    bbox_inches='tight')
 
         print(f"✅ Text embedding visualization saved to 'text_embed_visualizations/' directory")
         print(f"   - Embedding shape: {vocab_size} × {embedding_dim}")
@@ -347,12 +347,18 @@ class DiT(nn.Module):
 
         self.checkpoint_activations = checkpoint_activations
 
-        self.vq = VectorQuantize(
+        # self.vq = VectorQuantize(
+        #     dim=512,
+        #     codebook_size=512,
+        #     decay=0.8,
+        #     commitment_weight=1.
+        # ).to('cuda')
+
+        self.vq = ResidualVQ(
             dim=512,
+            num_quantizers=4,
             codebook_size=512,
-            decay=0.8,
-            commitment_weight=1.
-        ).to('cuda')
+        )
 
         self.initialize_weights()
 
@@ -427,17 +433,20 @@ class DiT(nn.Module):
         # t: conditioning time, text: text, x: noised audio + cond audio + text
         t = self.time_embed(time)
         if cfg_infer:  # pack cond & uncond forward: b n d -> 2b n d
-            x_cond, loss1 = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False, text_embed=text_embed,
-                                          cache=cache)
-            x_uncond, loss2 = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True, text_embed=text_embed,
-                                            cache=cache)
+            x_cond, loss1 = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False,
+                                                 text_embed=text_embed,
+                                                 cache=cache)
+            x_uncond, loss2 = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True,
+                                                   text_embed=text_embed,
+                                                   cache=cache)
             x = torch.cat((x_cond, x_uncond), dim=0)
             t = torch.cat((t, t), dim=0)
             mask = torch.cat((mask, mask), dim=0) if mask is not None else None
             vq_loss = loss1 + loss2
         else:
-            x, vq_loss = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond, drop_text=drop_text, cache=cache,
-                                     text_embed=text_embed)
+            x, vq_loss = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond, drop_text=drop_text,
+                                              cache=cache,
+                                              text_embed=text_embed)
 
         rope = self.rotary_embed.forward_from_seq_len(seq_len)
 

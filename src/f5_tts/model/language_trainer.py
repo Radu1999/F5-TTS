@@ -386,6 +386,7 @@ class Trainer:
                         mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler
                     )
 
+                    loss_vq = loss_vq.mean()
                     if loss_vq is not None:
                         self.accelerator.log({"vq_loss": loss_vq.item()}, step=global_update)
                         self.accelerator.backward(loss + loss_vq)
