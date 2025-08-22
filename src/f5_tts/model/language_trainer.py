@@ -158,6 +158,7 @@ class Trainer:
             checkpoint = dict(
                 model_state_dict=self.accelerator.unwrap_model(self.model).state_dict(),
                 optimizer_state_dict=self.optimizer.state_dict(),
+                ema_model_state_dict=self.ema_model.state_dict(),
                 scheduler_state_dict=self.scheduler.state_dict(),
                 update=update,
             )
@@ -376,20 +377,22 @@ class Trainer:
                     text_inputs = batch["text"]
                     mel_spec = batch["mel"].permute(0, 2, 1)
                     mel_lengths = batch["mel_lengths"]
+                    labels = batch["label"]
 
                     # TODO. add duration predictor training
                     if self.duration_predictor is not None and self.accelerator.is_local_main_process:
                         dur_loss = self.duration_predictor(mel_spec, lens=batch.get("durations"))
                         self.accelerator.log({"duration loss": dur_loss.item()}, step=global_update)
 
-                    loss, loss_vq, cond, pred = self.model(
-                        mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler
+                    loss, loss_vq, speaker_loss, cond, pred = self.model(
+                        mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler, labels=labels
                     )
 
                     loss_vq = loss_vq.mean()
                     if loss_vq is not None:
                         self.accelerator.log({"vq_loss": loss_vq.item()}, step=global_update)
-                        self.accelerator.backward(loss + loss_vq)
+                        self.accelerator.log({"speaker_loss": speaker_loss.item()}, step=global_update)
+                        self.accelerator.backward(loss + loss_vq + speaker_loss)
                     else:
                         self.accelerator.backward(loss)
 

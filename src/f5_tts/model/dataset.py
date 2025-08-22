@@ -1,4 +1,5 @@
 import json
+import random
 from importlib.resources import files
 
 import torch
@@ -94,6 +95,13 @@ class CustomDataset(Dataset):
         mel_spec_module: nn.Module | None = None,
     ):
         self.data = custom_dataset
+        if custom_dataset[0].get("client_id", None) != None:
+            print("DS HAS LABELS")
+            labels = set(custom_dataset['client_id'])
+            self.id2idx = {id_: idx for idx, id_ in enumerate(labels)}
+        else:
+            self.id2idx = {id_: idx for idx, id_ in enumerate(range(401))}
+
         self.durations = durations
         self.target_sample_rate = target_sample_rate
         self.hop_length = hop_length
@@ -131,6 +139,7 @@ class CustomDataset(Dataset):
             audio_path = row["audio_path"]
             text = row["text"]
             duration = row["duration"]
+            label = row.get("client_id", random.randint(1, 300))
             prompt = row.get("prompt", None)
 
             # filter by given length
@@ -161,6 +170,7 @@ class CustomDataset(Dataset):
             "mel_spec": mel_spec,
             "prompt": prompt,
             "text": text,
+            "label": self.id2idx[label]
         }
 
 
@@ -322,6 +332,8 @@ def collate_fn(batch):
     mel_specs = torch.stack(padded_mel_specs)
 
     text = [item["text"] for item in batch]
+    label = [item["label"] for item in batch]
+
     text_lengths = torch.LongTensor([len(item) for item in text])
 
     return dict(
@@ -329,4 +341,5 @@ def collate_fn(batch):
         mel_lengths=mel_lengths,  # records for padding mask
         text=text,
         text_lengths=text_lengths,
+        label=label
     )

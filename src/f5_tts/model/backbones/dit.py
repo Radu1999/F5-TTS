@@ -20,6 +20,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from sklearn.decomposition import PCA
 import os
+from f5_tts.model.backbones.grad_reversal import GradientReversal
 
 from f5_tts.model.modules import (
     AdaLayerNorm_Final,
@@ -360,6 +361,15 @@ class DiT(nn.Module):
             codebook_size=512,
         )
 
+        self.criterion = nn.CrossEntropyLoss()
+
+        # self.classifier = nn.Sequential(
+        #     GradientReversal(alpha=1.0),
+        #     nn.Linear(512, 1024),
+        #     nn.ReLU(),
+        #     nn.Linear(1024, 367)
+        # )
+
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -391,6 +401,7 @@ class DiT(nn.Module):
             drop_text: bool = False,
             cache: bool = True,
             text_embed=None,
+            labels=None,
     ):
         seq_len = x.shape[1]
         if cache:
@@ -405,10 +416,14 @@ class DiT(nn.Module):
         else:
             text_embed = self.text_embed(text, seq_len, drop_text=drop_text, text_embed=text_embed)
 
+#        logits = self.classifier(text_embed.mean(dim=1))
+
+#        speaker_loss = self.criterion(logits, torch.tensor(labels)) if labels is not None else torch.tensor(0)
+
         text_embed, encoding_indices, loss = self.vq(text_embed)
         x = self.input_embed(x, cond, text_embed, drop_audio_cond=drop_audio_cond)
 
-        return x, loss
+        return x, loss, torch.tensor(0)
 
     def clear_cache(self):
         self.text_cond, self.text_uncond = None, None
@@ -425,6 +440,7 @@ class DiT(nn.Module):
             cfg_infer: bool = False,  # cfg inference, pack cond & uncond forward
             cache: bool = False,
             text_embed=None,
+            labels=None,
     ):
         batch, seq_len = x.shape[0], x.shape[1]
         if time.ndim == 0:
@@ -433,20 +449,22 @@ class DiT(nn.Module):
         # t: conditioning time, text: text, x: noised audio + cond audio + text
         t = self.time_embed(time)
         if cfg_infer:  # pack cond & uncond forward: b n d -> 2b n d
-            x_cond, loss1 = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False,
-                                                 text_embed=text_embed,
-                                                 cache=cache)
-            x_uncond, loss2 = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True,
-                                                   text_embed=text_embed,
-                                                   cache=cache)
+            x_cond, loss1, sloss1 = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False,
+                                                         text_embed=text_embed,
+                                                         cache=cache)
+            x_uncond, loss2, sloss2 = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True,
+                                                           text_embed=text_embed,
+                                                           cache=cache)
             x = torch.cat((x_cond, x_uncond), dim=0)
             t = torch.cat((t, t), dim=0)
             mask = torch.cat((mask, mask), dim=0) if mask is not None else None
             vq_loss = loss1 + loss2
+            speaker_loss = sloss1 + sloss2
         else:
-            x, vq_loss = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond, drop_text=drop_text,
-                                              cache=cache,
-                                              text_embed=text_embed)
+            x, vq_loss, speaker_loss = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond,
+                                                            drop_text=drop_text,
+                                                            cache=cache,
+                                                            text_embed=text_embed, labels=labels)
 
         rope = self.rotary_embed.forward_from_seq_len(seq_len)
 
@@ -466,4 +484,4 @@ class DiT(nn.Module):
         x = self.norm_out(x, t)
         output = self.proj_out(x)
 
-        return output, vq_loss
+        return output, vq_loss, speaker_loss

@@ -178,7 +178,7 @@ class CFM(nn.Module):
                 return pred
 
             # predict flow (cond and uncond), for classifier-free guidance
-            pred_cfg, _ = self.transformer(
+            pred_cfg, _, _ = self.transformer(
                 x=x,
                 cond=step_cond,
                 text=text,
@@ -236,6 +236,7 @@ class CFM(nn.Module):
         lens: int["b"] | None = None,  # noqa: F821
         noise_scheduler: str | None = None,
         text_embed=None,
+        labels=None,
     ):
         # handle raw wave
         if inp.ndim == 2:
@@ -294,12 +295,12 @@ class CFM(nn.Module):
         # apply mask will use more memory; might adjust batchsize or batchsampler long sequence threshold
         drop_text = False
         drop_audio_cond = False
-        pred, vq_loss = self.transformer(
-            x=φ, cond=cond, text=text, time=time, drop_audio_cond=drop_audio_cond, drop_text=drop_text, mask=mask, text_embed=text_embed
+        pred, vq_loss, speaker_loss = self.transformer(
+            x=φ, cond=cond, labels=labels, text=text, time=time, drop_audio_cond=drop_audio_cond, drop_text=drop_text, mask=mask, text_embed=text_embed
         )
 
         # flow matching loss
         loss = F.mse_loss(pred, flow, reduction="none")
         loss = loss[rand_span_mask]
 
-        return loss.mean(), vq_loss, cond, pred
+        return loss.mean(), vq_loss, speaker_loss, cond, pred
