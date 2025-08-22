@@ -416,9 +416,9 @@ class DiT(nn.Module):
         else:
             text_embed = self.text_embed(text, seq_len, drop_text=drop_text, text_embed=text_embed)
 
-#        logits = self.classifier(text_embed.mean(dim=1))
+        # logits = self.classifier(text_embed.mean(dim=1))
 
-#        speaker_loss = self.criterion(logits, torch.tensor(labels)) if labels is not None else torch.tensor(0)
+        # speaker_loss = self.criterion(logits, torch.tensor(labels)) if labels is not None else torch.tensor(0)
 
         text_embed, encoding_indices, loss = self.vq(text_embed)
         x = self.input_embed(x, cond, text_embed, drop_audio_cond=drop_audio_cond)

@@ -158,9 +158,13 @@ def convert_char_to_pinyin(text_list, polyphone=True):
         #     "\u3100" <= c <= "\u9fff"  # common chinese characters
         # )
         return False
-    return text_list
+
     for text in text_list:
         char_list = []
+        for c in text:
+            char_list.append(c)
+        final_text_list.append(char_list)
+        continue
         text = text.translate(custom_trans)
         for seg in jieba.cut(text):
             seg_byte_len = len(bytes(seg, "UTF-8"))

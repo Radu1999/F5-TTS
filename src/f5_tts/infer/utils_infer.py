@@ -218,11 +218,11 @@ def load_checkpoint(model, ckpt_path, device: str, dtype=None, use_ema=False):
             if key in checkpoint["model_state_dict"]:
                 del checkpoint["model_state_dict"][key]
 
-        model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+        model.load_state_dict(checkpoint["model_state_dict"])
     else:
         if ckpt_type == "safetensors":
             checkpoint = {"model_state_dict": checkpoint}
-        model.load_state_dict(checkpoint["model_state_dict"], strict=False)
+        model.load_state_dict(checkpoint["model_state_dict"])
 
     del checkpoint
     torch.cuda.empty_cache()
@@ -270,6 +270,9 @@ def load_model(
 
     dtype = torch.float32 if mel_spec_type == "bigvgan" else None
     model = load_checkpoint(model, ckpt_path, device, dtype=dtype, use_ema=use_ema)
+    
+    # Set model to evaluation mode for inference
+    model.eval()
 
     return model
 
@@ -396,7 +399,6 @@ def infer_process(
     speed=speed,
     fix_duration=fix_duration,
     device=device,
-    language_module=None
 ):
     # Split the input text into batches
     audio, sr = torchaudio.load(ref_audio)
@@ -424,7 +426,6 @@ def infer_process(
             speed=speed,
             fix_duration=fix_duration,
             device=device,
-            language_module=language_module
         )
     )
 
@@ -450,7 +451,6 @@ def infer_batch_process(
     device=None,
     streaming=False,
     chunk_size=2048,
-    language_module=None,
 ):
     audio, sr = ref_audio
     if audio.shape[0] > 1:
