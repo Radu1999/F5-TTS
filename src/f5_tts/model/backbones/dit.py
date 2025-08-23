@@ -458,8 +458,7 @@ class DiT(nn.Module):
             x = torch.cat((x_cond, x_uncond), dim=0)
             t = torch.cat((t, t), dim=0)
             mask = torch.cat((mask, mask), dim=0) if mask is not None else None
-            if loss1 is not None:
-                vq_loss = loss1 + loss2
+            vq_loss = loss1 + loss2 if loss1 is not None else None
             speaker_loss = sloss1 + sloss2
         else:
             x, vq_loss, speaker_loss = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond,
