@@ -420,10 +420,10 @@ class DiT(nn.Module):
 
         # speaker_loss = self.criterion(logits, torch.tensor(labels)) if labels is not None else torch.tensor(0)
 
-        text_embed, encoding_indices, loss = self.vq(text_embed)
+        # text_embed, encoding_indices, loss = self.vq(text_embed)
         x = self.input_embed(x, cond, text_embed, drop_audio_cond=drop_audio_cond)
 
-        return x, loss, torch.tensor(0)
+        return x, None, torch.tensor(0)
 
     def clear_cache(self):
         self.text_cond, self.text_uncond = None, None
