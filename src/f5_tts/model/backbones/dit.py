@@ -423,7 +423,7 @@ class DiT(nn.Module):
         # text_embed, encoding_indices, loss = self.vq(text_embed)
         x = self.input_embed(x, cond, text_embed, drop_audio_cond=drop_audio_cond)
 
-        return x, None, torch.tensor(0)
+        return x, torch.tensor(0), torch.tensor(0)
 
     def clear_cache(self):
         self.text_cond, self.text_uncond = None, None
