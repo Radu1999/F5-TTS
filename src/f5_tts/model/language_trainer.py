@@ -388,12 +388,15 @@ class Trainer:
                         mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler, labels=labels
                     )
 
+                    if speaker_loss is not None:
+                        self.accelerator.log({"speaker_loss": speaker_loss.item()}, step=global_update)
+                        loss += speaker_loss
+
 
                     if loss_vq is not None:
                         loss_vq = loss_vq.mean()
                         self.accelerator.log({"vq_loss": loss_vq.item()}, step=global_update)
-                        self.accelerator.log({"speaker_loss": speaker_loss.item()}, step=global_update)
-                        self.accelerator.backward(loss + loss_vq + speaker_loss)
+                        self.accelerator.backward(loss + loss_vq)
                     else:
                         self.accelerator.backward(loss)
 

@@ -95,9 +95,9 @@ class CustomDataset(Dataset):
         mel_spec_module: nn.Module | None = None,
     ):
         self.data = custom_dataset
-        if custom_dataset[0].get("client_id", None) != None:
+        if custom_dataset[0].get("speaker", None) != None:
             print("DS HAS LABELS")
-            labels = set(custom_dataset['client_id'])
+            labels = set(custom_dataset['speaker'])
             self.id2idx = {id_: idx for idx, id_ in enumerate(labels)}
         else:
             self.id2idx = {id_: idx for idx, id_ in enumerate(range(401))}
@@ -139,7 +139,7 @@ class CustomDataset(Dataset):
             audio_path = row["audio_path"]
             text = row["text"]
             duration = row["duration"]
-            label = row.get("client_id", random.randint(1, 300))
+            label = row.get("speaker", random.randint(1, 300))
             prompt = row.get("prompt", None)
 
             # filter by given length
@@ -273,7 +273,7 @@ def load_dataset(
             try:
                 train_dataset = load_from_disk(f"{rel_data_path}/raw")
             except:  # noqa: E722
-                train_dataset = Dataset_.from_file(f"{rel_data_path}/raw.arrow")
+                train_dataset = Dataset_.from_file(f"{rel_data_path}/raw_with_client_id.arrow")
             preprocessed_mel = False
         elif audio_type == "mel":
             train_dataset = Dataset_.from_file(f"{rel_data_path}/mel.arrow")

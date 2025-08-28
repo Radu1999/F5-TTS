@@ -363,12 +363,12 @@ class DiT(nn.Module):
 
         self.criterion = nn.CrossEntropyLoss()
 
-        # self.classifier = nn.Sequential(
-        #     GradientReversal(alpha=1.0),
-        #     nn.Linear(512, 1024),
-        #     nn.ReLU(),
-        #     nn.Linear(1024, 367)
-        # )
+        self.classifier = nn.Sequential(
+            GradientReversal(alpha=1.0),
+            nn.Linear(512, 1024),
+            nn.ReLU(),
+            nn.Linear(1024, 367)
+        )
 
         self.initialize_weights()
 
@@ -416,14 +416,14 @@ class DiT(nn.Module):
         else:
             text_embed = self.text_embed(text, seq_len, drop_text=drop_text, text_embed=text_embed)
 
-        # logits = self.classifier(text_embed.mean(dim=1))
+        logits = self.classifier(text_embed.mean(dim=1))
 
-        # speaker_loss = self.criterion(logits, torch.tensor(labels)) if labels is not None else torch.tensor(0)
+        speaker_loss = self.criterion(logits, torch.tensor(labels)) if labels is not None else torch.tensor(0)
 
-        text_embed, encoding_indices, loss = self.vq(text_embed)
+        loss = None #  text_embed, encoding_indices, loss = self.vq(text_embed)
         x = self.input_embed(x, cond, text_embed, drop_audio_cond=drop_audio_cond)
 
-        return x, loss, torch.tensor(0)
+        return x, loss, speaker_loss
 
     def clear_cache(self):
         self.text_cond, self.text_uncond = None, None
