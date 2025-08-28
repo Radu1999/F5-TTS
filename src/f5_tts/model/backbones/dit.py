@@ -357,7 +357,7 @@ class DiT(nn.Module):
 
         self.vq = ResidualVQ(
             dim=512,
-            num_quantizers=4,
+            num_quantizers=8,
             codebook_size=512,
         )
 
@@ -420,7 +420,7 @@ class DiT(nn.Module):
 
         # speaker_loss = self.criterion(logits, torch.tensor(labels)) if labels is not None else torch.tensor(0)
 
-        # text_embed, encoding_indices, loss = self.vq(text_embed)
+        text_embed, encoding_indices, loss = self.vq(text_embed)
         x = self.input_embed(x, cond, text_embed, drop_audio_cond=drop_audio_cond)
 
         return x, None, torch.tensor(0)
