@@ -91,6 +91,8 @@ def main():
         args.checkpoint_path = str(
             files("f5_tts").joinpath(f"../../ckpts/{args.dataset_name}")
         )
+    else:
+        args.checkpoint_path = str(files("f5_tts").joinpath(f"../../ckpts/{args.checkpoint_path}"))
 
     checkpoint_path = args.checkpoint_path
 
