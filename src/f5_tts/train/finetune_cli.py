@@ -76,6 +76,7 @@ def parse_args():
     )
     parser.add_argument('--wandb_key', type=str, default=None, required=False)
     parser.add_argument('--sanity_check', action='store_true', help='Run one batch for sanity check.')
+    parser.add_argument("--checkpoint_path", type=str, default=None)
 
     return parser.parse_args()
 
@@ -86,7 +87,12 @@ def parse_args():
 def main():
     args = parse_args()
 
-    checkpoint_path = str(files("f5_tts").joinpath(f"../../ckpts/{args.dataset_name}"))
+    if args.checkpoint_path is None:
+        args.checkpoint_path = str(
+            files("f5_tts").joinpath(f"../../ckpts/{args.dataset_name}")
+        )
+
+    checkpoint_path = args.checkpoint_path
 
     # Model parameters based on experiment name
 

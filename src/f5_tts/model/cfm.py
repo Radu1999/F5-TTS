@@ -293,8 +293,6 @@ class CFM(nn.Module):
             drop_text = False
 
         # apply mask will use more memory; might adjust batchsize or batchsampler long sequence threshold
-        drop_text = False
-        drop_audio_cond = False
         pred, vq_loss, speaker_loss = self.transformer(
             x=φ, cond=cond, labels=labels, text=text, time=time, drop_audio_cond=drop_audio_cond, drop_text=drop_text, mask=mask, text_embed=text_embed
         )
