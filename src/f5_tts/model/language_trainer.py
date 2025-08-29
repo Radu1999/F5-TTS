@@ -388,6 +388,8 @@ class Trainer:
                         mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler, labels=labels
                     )
 
+                    self.accelerator.log({"flow_loss": loss.item()}, step=global_update)
+
                     if speaker_loss is not None:
                         self.accelerator.log({"speaker_loss": speaker_loss.item()}, step=global_update)
                         loss += speaker_loss
