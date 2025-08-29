@@ -418,7 +418,7 @@ class DiT(nn.Module):
 
         logits = self.classifier(text_embed.mean(dim=1))
 
-        speaker_loss = self.criterion(logits, torch.tensor(labels)) if labels is not None else torch.tensor(0)
+        speaker_loss = self.criterion(logits, torch.tensor(labels).to('cuda')) if labels is not None else torch.tensor(0)
 
         loss = None #  text_embed, encoding_indices, loss = self.vq(text_embed)
         x = self.input_embed(x, cond, text_embed, drop_audio_cond=drop_audio_cond)
