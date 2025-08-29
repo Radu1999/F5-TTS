@@ -423,7 +423,7 @@ class DiT(nn.Module):
         loss = None #  text_embed, encoding_indices, loss = self.vq(text_embed)
         x = self.input_embed(x, cond, text_embed, drop_audio_cond=drop_audio_cond)
 
-        return x, loss, speaker_loss
+        return x, loss, 0.1 * speaker_loss
 
     def clear_cache(self):
         self.text_cond, self.text_uncond = None, None
