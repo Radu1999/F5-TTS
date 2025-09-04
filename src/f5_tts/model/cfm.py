@@ -237,6 +237,7 @@ class CFM(nn.Module):
         noise_scheduler: str | None = None,
         text_embed=None,
         labels=None,
+        language='ro'
     ):
         # handle raw wave
         if inp.ndim == 2:

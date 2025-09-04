@@ -11,8 +11,6 @@ from f5_tts.model.dataset import load_dataset
 from f5_tts.model.utils import get_tokenizer
 from f5_tts.model.backbones.dit import LanguageModule
 
-
-
 # -------------------------- Dataset Settings --------------------------- #
 target_sample_rate = 24000
 n_mel_channels = 100
@@ -176,7 +174,6 @@ def main():
     else:
         tokenizer_path = args.dataset_name
 
-
     vocab_char_map, vocab_size = get_tokenizer(tokenizer_path, tokenizer)
 
     print("\nvocab : ", vocab_size)
@@ -202,13 +199,7 @@ def main():
     for p in model.parameters():
         p.requires_grad = False
 
-
-
-    # unfreeze text embeddings
-    for p in model.transformer.text_embed.parameters():
-        p.requires_grad = True
-
-    for p in model.transformer.vq.parameters():
+    for p in model.transformer.language_module.parameters():
         p.requires_grad = True
 
     trainer = Trainer(
@@ -232,7 +223,6 @@ def main():
         last_per_updates=args.last_per_updates,
         bnb_optimizer=args.bnb_optimizer,
     )
-
 
     train_dataset = load_dataset(args.dataset_name, tokenizer, mel_spec_kwargs=mel_spec_kwargs)
     print('STARTED TRAINING')

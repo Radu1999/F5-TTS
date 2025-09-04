@@ -41,24 +41,22 @@ from f5_tts.model.utils import (
 
 
 class LanguageModule(nn.Module):
-    def __init__(self, text_num_embeds=256, text_dim=None, conv_mult=2, conv_layers=4, vocab_char_map=None,
+    def __init__(self, text_num_embeds=256, text_dim=None, conv_mult=2, conv_layers=4,
                  mask_padding=True):
         super().__init__()
-        self.vq_layer = None
-        self.codebook = None
-        self.vocab_char_map = vocab_char_map
         self.text_blocks = nn.Sequential(
             *[ConvNeXtV2Block(text_dim, text_dim * conv_mult) for _ in range(conv_layers)]
         )
         self.text_embed = nn.Embedding(text_num_embeds + 1, text_dim)
         self.mask_padding = mask_padding
-        self.pre_proj = None
-        self.residual_vq = None
+        self.vq = VectorQuantize(
+            dim=text_dim,
+            codebook_size=512,
+            decay=0.8,
+            commitment_weight=1.
+        ).to('cuda')
 
-    def forward(self, text: int["b nt"], seq_len, drop_text=False, inference=False,
-                step=None):  # noqa: F722
-        if isinstance(text, list):
-            text = list_str_to_idx(text, self.vocab_char_map).to('cuda')
+    def forward(self, text: int["b nt"], seq_len):  # noqa: F722
         text = text + 1  # use 0 as filler token. preprocess of batch pad -1, see list_str_to_idx()
         text = text[:, :seq_len]  # curtail if character tokens are more than the mel spec tokens
         batch, text_len = text.shape[0], text.shape[1]
@@ -73,142 +71,10 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
-        z_q, encoding_indices, loss = self.residual_vq(text)
+        z_q, encoding_indices, loss = self.vq(text)
         z_q = z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
         return z_q, loss.mean(), encoding_indices
-
-    def build_vq(self, text_embed: nn.Embedding):
-        self.residual_vq = ResidualVQ(
-            dim=text_embed.weight.data.shape[1],
-            codebook_size=16,
-            num_quantizers=4,
-        ).to('cuda')
-
-        self.residual_vq = VectorQuantize(
-            dim=256,
-            codebook_size=512,
-            decay=0.8,
-            commitment_weight=1.
-        ).to('cuda')
-
-    def visualize_text_embed_weights(self, weights_data):
-        """
-        Visualize text embedding weights with multiple visualization types
-        Args:
-            weights_data: tensor of shape (vocab_size, embedding_dim)
-        """
-        # Convert to numpy for visualization
-        weights_np = weights_data.detach().cpu().numpy()
-        vocab_size, embedding_dim = weights_np.shape
-
-        # Create output directory for visualizations
-        os.makedirs("text_embed_visualizations", exist_ok=True)
-
-        # Set up the visualization style
-        plt.style.use('default')
-        sns.set_palette("husl")
-
-        # 1. Weight Distribution Histogram
-        plt.figure(figsize=(12, 8))
-        plt.subplot(2, 3, 1)
-        plt.hist(weights_np.flatten(), bins=50, alpha=0.7, density=True)
-        plt.title('Distribution of Embedding Weights')
-        plt.xlabel('Weight Value')
-        plt.ylabel('Density')
-        plt.grid(True, alpha=0.3)
-
-        # 2. Heatmap of embedding weights (sampled if too large)
-        plt.subplot(2, 3, 2)
-        # Sample embeddings if vocabulary is too large for visualization
-        max_vocab_display = 100
-        if vocab_size > max_vocab_display:
-            indices = np.linspace(0, vocab_size - 1, max_vocab_display, dtype=int)
-            weights_sample = weights_np[indices]
-            title_suffix = f" (sampled {max_vocab_display}/{vocab_size})"
-        else:
-            weights_sample = weights_np
-            title_suffix = ""
-
-        sns.heatmap(weights_sample, cmap='RdBu_r', center=0,
-                    cbar_kws={'label': 'Weight Value'})
-        plt.title(f'Embedding Weights Heatmap{title_suffix}')
-        plt.xlabel('Embedding Dimension')
-        plt.ylabel('Vocabulary Index')
-
-        # 3. Statistics per embedding dimension
-        plt.subplot(2, 3, 3)
-        dim_means = np.mean(weights_np, axis=0)
-        dim_stds = np.std(weights_np, axis=0)
-        x_dims = np.arange(embedding_dim)
-
-        plt.plot(x_dims, dim_means, label='Mean', alpha=0.8)
-        plt.fill_between(x_dims, dim_means - dim_stds, dim_means + dim_stds,
-                         alpha=0.3, label='±1 std')
-        plt.title('Statistics per Embedding Dimension')
-        plt.xlabel('Dimension Index')
-        plt.ylabel('Weight Value')
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-
-        # 4. L2 norms of embeddings
-        plt.subplot(2, 3, 4)
-        l2_norms = np.linalg.norm(weights_np, axis=1)
-        plt.hist(l2_norms, bins=30, alpha=0.7)
-        plt.title('L2 Norms of Embeddings')
-        plt.xlabel('L2 Norm')
-        plt.ylabel('Frequency')
-        plt.grid(True, alpha=0.3)
-
-        # 5. PCA Visualization (if embedding_dim > 2)
-        plt.subplot(2, 3, 5)
-        if embedding_dim > 2:
-            pca = PCA(n_components=2)
-            weights_pca = pca.fit_transform(weights_np)
-            plt.scatter(weights_pca[:, 0], weights_pca[:, 1], alpha=0.6, s=20)
-            plt.title(f'PCA Visualization\n(Explained variance: {pca.explained_variance_ratio_.sum():.3f})')
-            plt.xlabel(f'PC1 ({pca.explained_variance_ratio_[0]:.3f})')
-            plt.ylabel(f'PC2 ({pca.explained_variance_ratio_[1]:.3f})')
-        else:
-            plt.scatter(weights_np[:, 0], weights_np[:, 1] if embedding_dim > 1 else np.zeros_like(weights_np[:, 0]))
-            plt.title('2D Embedding Visualization')
-            plt.xlabel('Dimension 1')
-            plt.ylabel('Dimension 2' if embedding_dim > 1 else 'Zero')
-        plt.grid(True, alpha=0.3)
-
-        # 6. Summary statistics
-        plt.subplot(2, 3, 6)
-        stats_text = f"""
-        Embedding Statistics:
-        
-        Shape: {vocab_size} × {embedding_dim}
-        Mean: {np.mean(weights_np):.4f}
-        Std: {np.std(weights_np):.4f}
-        Min: {np.min(weights_np):.4f}
-        Max: {np.max(weights_np):.4f}
-        
-        Per-token L2 norm:
-        Mean: {np.mean(l2_norms):.4f}
-        Std: {np.std(l2_norms):.4f}
-        """
-        plt.text(0.1, 0.5, stats_text, fontsize=10, verticalalignment='center',
-                 bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.5))
-        plt.axis('off')
-        plt.title('Summary Statistics')
-
-        plt.tight_layout()
-        plt.savefig('text_embed_visualizations/text_embed_weights_analysis.png',
-                    dpi=300, bbox_inches='tight')
-        plt.savefig('text_embed_visualizations/text_embed_weights_analysis.pdf',
-                    bbox_inches='tight')
-
-        print(f"✅ Text embedding visualization saved to 'text_embed_visualizations/' directory")
-        print(f"   - Embedding shape: {vocab_size} × {embedding_dim}")
-        print(f"   - Weight statistics: mean={np.mean(weights_np):.4f}, std={np.std(weights_np):.4f}")
-        print(f"   - L2 norm statistics: mean={np.mean(l2_norms):.4f}, std={np.std(l2_norms):.4f}")
-
-        # Optional: Close the plot to free memory
-        plt.close()
 
 
 class TextEmbedding(nn.Module):
@@ -312,6 +178,7 @@ class DiT(nn.Module):
         super().__init__()
 
         self.time_embed = TimestepEmbedding(dim)
+        self.language_module = LanguageModule(text_num_embeds=text_num_embeds, text_dim=text_dim)
         if text_dim is None:
             text_dim = mel_dim
         self.text_embed = TextEmbedding(
@@ -363,12 +230,12 @@ class DiT(nn.Module):
 
         self.criterion = nn.CrossEntropyLoss()
 
-        self.classifier = nn.Sequential(
-            GradientReversal(alpha=1.0),
-            nn.Linear(512, 1024),
-            nn.ReLU(),
-            nn.Linear(1024, 367)
-        )
+        # self.classifier = nn.Sequential(
+        #     GradientReversal(alpha=1.0),
+        #     nn.Linear(512, 1024),
+        #     nn.ReLU(),
+        #     nn.Linear(1024, 367)
+        # )
 
         self.initialize_weights()
 
@@ -416,14 +283,14 @@ class DiT(nn.Module):
         else:
             text_embed = self.text_embed(text, seq_len, drop_text=drop_text, text_embed=text_embed)
 
-        logits = self.classifier(text_embed.mean(dim=1))
+        # logits = self.classifier(text_embed.mean(dim=1))
 
-        speaker_loss = self.criterion(logits, torch.tensor(labels).to('cuda')) if labels is not None else torch.tensor(0)
-
-        loss = None #  text_embed, encoding_indices, loss = self.vq(text_embed)
+        # speaker_loss = None  # 0.01 * self.criterion(logits, torch.tensor(labels).to('cuda')) if labels is not None else torch.tensor(0)
+        #
+        # text_embed, encoding_indices, loss = self.vq(text_embed)
         x = self.input_embed(x, cond, text_embed, drop_audio_cond=drop_audio_cond)
 
-        return x, loss, 0.01 * speaker_loss
+        return x, None, None
 
     def clear_cache(self):
         self.text_cond, self.text_uncond = None, None
@@ -441,6 +308,7 @@ class DiT(nn.Module):
             cache: bool = False,
             text_embed=None,
             labels=None,
+            lang='ro',
     ):
         batch, seq_len = x.shape[0], x.shape[1]
         if time.ndim == 0:
@@ -448,23 +316,26 @@ class DiT(nn.Module):
 
         # t: conditioning time, text: text, x: noised audio + cond audio + text
         t = self.time_embed(time)
+        if lang == 'ro':
+            text_embed, vq_loss, _ = self.language_module(text, x.shape[1])
+
         if cfg_infer:  # pack cond & uncond forward: b n d -> 2b n d
-            x_cond, loss1, sloss1 = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False,
-                                                         text_embed=text_embed,
-                                                         cache=cache)
-            x_uncond, loss2, sloss2 = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True,
-                                                           text_embed=text_embed,
-                                                           cache=cache)
+            x_cond, _, _ = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False,
+                                                text_embed=text_embed,
+                                                cache=cache)
+            x_uncond, _, _ = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True,
+                                                  text_embed=text_embed,
+                                                  cache=cache)
             x = torch.cat((x_cond, x_uncond), dim=0)
             t = torch.cat((t, t), dim=0)
             mask = torch.cat((mask, mask), dim=0) if mask is not None else None
-            vq_loss = loss1 + loss2 if loss1 is not None else None
-            speaker_loss = sloss1 + sloss2
+            # vq_loss = loss1 + loss2 if loss1 is not None else None
+            # speaker_loss = sloss1 + sloss2 if sloss1 is not None else None
         else:
-            x, vq_loss, speaker_loss = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond,
-                                                            drop_text=drop_text,
-                                                            cache=cache,
-                                                            text_embed=text_embed, labels=labels)
+            x, _, _ = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond,
+                                           drop_text=drop_text,
+                                           cache=cache,
+                                           text_embed=text_embed, labels=labels)
 
         rope = self.rotary_embed.forward_from_seq_len(seq_len)
 
@@ -484,4 +355,4 @@ class DiT(nn.Module):
         x = self.norm_out(x, t)
         output = self.proj_out(x)
 
-        return output, vq_loss, speaker_loss
+        return output, vq_loss, _
