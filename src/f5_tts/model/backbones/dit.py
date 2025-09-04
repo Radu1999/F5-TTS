@@ -49,11 +49,10 @@ class LanguageModule(nn.Module):
         )
         self.text_embed = nn.Embedding(text_num_embeds + 1, text_dim)
         self.mask_padding = mask_padding
-        self.vq = VectorQuantize(
+        self.vq = ResidualVQ(
             dim=text_dim,
             codebook_size=512,
-            decay=0.8,
-            commitment_weight=1.
+            num_quantizers=4
         ).to('cuda')
 
     def forward(self, text: int["b nt"], seq_len):  # noqa: F722
@@ -71,7 +70,8 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
-        z_q, encoding_indices, loss = self.vq(text)
+        return text, None, None
+        z_q, encoding_indices, loss =  self.vq(text)
         z_q = z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
         return z_q, loss.mean(), encoding_indices
