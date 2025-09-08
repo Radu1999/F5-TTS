@@ -56,22 +56,26 @@ class LanguageModule(nn.Module):
         ).to('cuda')
 
     def forward(self, text: int["b nt"], seq_len):  # noqa: F722
+
         text = text + 1  # use 0 as filler token. preprocess of batch pad -1, see list_str_to_idx()
+
         text = text[:, :seq_len]  # curtail if character tokens are more than the mel spec tokens
         batch, text_len = text.shape[0], text.shape[1]
+
         source_text = F.pad(text, (0, seq_len - text_len), value=0)
+        source_text = source_text.masked_fill(source_text == -1, 0)
 
         if self.mask_padding:
             text_mask = source_text == 0
 
         text = self.text_embed(source_text)
         text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
-        for block in self.text_blocks:
-            text = block(text)
-            text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
+        # for block in self.text_blocks:
+        #     text = block(text)
+        #     text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
         return text, None, None
-        z_q, encoding_indices, loss =  self.vq(text)
+        z_q, encoding_indices, loss = self.vq(text)
         z_q = z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
         return z_q, loss.mean(), encoding_indices
@@ -95,21 +99,42 @@ class TextEmbedding(nn.Module):
             self.extra_modeling = False
 
     def forward(self, text: int["b nt"], seq_len, text_embed=None, drop_text=False):  # noqa: F722
+
         text = text + 1  # use 0 as filler token. preprocess of batch pad -1, see list_str_to_idx()
         text = text[:, :seq_len]  # curtail if character tokens are more than the mel spec tokens
         batch, text_len = text.shape[0], text.shape[1]
 
+        # Pad text
         text = F.pad(text, (0, seq_len - text_len), value=0)
-        if drop_text:  # cfg for text
+
+        # Mark switch positions (-1)
+        switch_lang = text == -1
+
+        # Replace -1 with 0 for embedding lookup
+        text = text.masked_fill(switch_lang, 0)
+
+        # Drop text if configured
+        if drop_text:
             text = torch.zeros_like(text)
 
-        if self.mask_padding:
-            text_mask = text == 0
+        # Mask for padding
+        text_mask = text == 0 if self.mask_padding else None
 
-        if text_embed is not None:
-            text = text_embed
-        else:
-            text = self.text_embed(text)  # b n -> b n d
+        # Embed
+        switch_cumsum = switch_lang.cumsum(dim=1) % 2  # [batch, seq_len]
+        switch_cumsum = switch_cumsum.unsqueeze(-1)  # [batch, seq_len, 1]
+        text_embedded_en = self.text_embed(text)
+        text_embedded_lang = text_embed
+
+
+        # Select embeddings based on mask
+        out = torch.where(
+            switch_cumsum.bool(),
+            text_embedded_en,
+            text_embedded_lang,
+        )  # [batch, seq_len, emb_dim]
+
+        out = out.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, out.size(-1)), 0.0)
 
         # possible extra modeling
         if self.extra_modeling:
@@ -117,18 +142,18 @@ class TextEmbedding(nn.Module):
             batch_start = torch.zeros((batch,), dtype=torch.long)
             pos_idx = get_pos_embed_indices(batch_start, seq_len, max_pos=self.precompute_max_pos)
             text_pos_embed = self.freqs_cis[pos_idx]
-            text = text + text_pos_embed
+            out = out + text_pos_embed
 
             # convnextv2 blocks
             if self.mask_padding:
-                text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
+                out = out.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, out.size(-1)), 0.0)
                 for block in self.text_blocks:
-                    text = block(text)
-                    text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
+                    out = block(out)
+                    out = out.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, out.size(-1)), 0.0)
             else:
-                text = self.text_blocks(text)
+                out = self.text_blocks(out)
 
-        return text
+        return out
 
 
 # noised input audio and context mixing embedding
