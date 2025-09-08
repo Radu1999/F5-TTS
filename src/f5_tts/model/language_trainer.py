@@ -337,6 +337,8 @@ class Trainer:
             train_dataloader, self.scheduler
         )  # actual multi_gpu updates = single_gpu updates / gpu nums
         start_update = self.load_checkpoint()
+        self.model.transformer.language_module.set_emb(self.model.transformer.text_embed.text_embed)
+        self.model.transformer.language_module.text_embed.requires_grad = True
         global_update = start_update
 
         if exists(resumable_with_seed):

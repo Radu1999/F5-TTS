@@ -42,12 +42,15 @@ from f5_tts.model.utils import (
 
 class LanguageModule(nn.Module):
     def __init__(self, text_num_embeds=256, text_dim=None, conv_mult=2, conv_layers=4,
-                 mask_padding=True):
+                 mask_padding=True, embeddings=None):
         super().__init__()
         self.text_blocks = nn.Sequential(
             *[ConvNeXtV2Block(text_dim, text_dim * conv_mult) for _ in range(conv_layers)]
         )
-        self.text_embed = nn.Embedding(text_num_embeds + 1, text_dim)
+        if embeddings is None:
+            self.text_embed = nn.Embedding(text_num_embeds + 1, text_dim)
+        else:
+            self.text_embed = embeddings
         self.mask_padding = mask_padding
         self.vq = ResidualVQ(
             dim=text_dim,
@@ -58,12 +61,19 @@ class LanguageModule(nn.Module):
     def forward(self, text: int["b nt"], seq_len):  # noqa: F722
 
         text = text + 1  # use 0 as filler token. preprocess of batch pad -1, see list_str_to_idx()
-
+        switch_lang = text == -1
+        switch_cumsum = switch_lang.cumsum(dim=1) % 2  # Calculate before removing tokens
+        # Remove -1 tokens but keep the switch_cumsum for remaining tokens
+        text = text[~switch_lang].reshape(text.shape[0], -1)
+        switch_cumsum = switch_cumsum[~switch_lang].reshape(text.shape[0], -1)
         text = text[:, :seq_len]  # curtail if character tokens are more than the mel spec tokens
+        switch_cumsum = switch_cumsum[:, :seq_len]
+
         batch, text_len = text.shape[0], text.shape[1]
 
         source_text = F.pad(text, (0, seq_len - text_len), value=0)
-        source_text = source_text.masked_fill(source_text == -1, 0)
+        switch_cumsum = F.pad(switch_cumsum, (0, seq_len - text_len), value=1).bool()
+        source_text = source_text.masked_fill(switch_cumsum, 0)
 
         if self.mask_padding:
             text_mask = source_text == 0
@@ -80,6 +90,9 @@ class LanguageModule(nn.Module):
 
         return z_q, loss.mean(), encoding_indices
 
+    def set_emb(self, embeddings):
+        self.text_embed = embeddings
+        
 
 class TextEmbedding(nn.Module):
     def __init__(self, text_num_embeds, text_dim, mask_padding=True, conv_layers=0, conv_mult=2):
@@ -99,19 +112,21 @@ class TextEmbedding(nn.Module):
             self.extra_modeling = False
 
     def forward(self, text: int["b nt"], seq_len, text_embed=None, drop_text=False):  # noqa: F722
-
-        text = text + 1  # use 0 as filler token. preprocess of batch pad -1, see list_str_to_idx()
-        text = text[:, :seq_len]  # curtail if character tokens are more than the mel spec tokens
-        batch, text_len = text.shape[0], text.shape[1]
-
-        # Pad text
-        text = F.pad(text, (0, seq_len - text_len), value=0)
-
-        # Mark switch positions (-1)
+        # Mark switch positions (-1) before removing them
+        text = text + 1
         switch_lang = text == -1
+        switch_cumsum = switch_lang.cumsum(dim=1) % 2  # Calculate before removing tokens
 
-        # Replace -1 with 0 for embedding lookup
-        text = text.masked_fill(switch_lang, 0)
+        # Remove -1 tokens but keep the switch_cumsum for remaining tokens
+        text = text[~switch_lang].reshape(text.shape[0], -1)
+        switch_cumsum = switch_cumsum[~switch_lang].reshape(text.shape[0], -1)
+
+        text = text[:, :seq_len]  # curtail if character tokens are more than the mel spec tokens
+        switch_cumsum = switch_cumsum[:, :seq_len]  # curtail switch_cumsum too
+
+        batch, text_len = text.shape[0], text.shape[1]
+        text = F.pad(text, (0, seq_len - text_len), value=0)
+        switch_cumsum = F.pad(switch_cumsum, (0, seq_len - text_len), value=0)
 
         # Drop text if configured
         if drop_text:
@@ -121,11 +136,9 @@ class TextEmbedding(nn.Module):
         text_mask = text == 0 if self.mask_padding else None
 
         # Embed
-        switch_cumsum = switch_lang.cumsum(dim=1) % 2  # [batch, seq_len]
         switch_cumsum = switch_cumsum.unsqueeze(-1)  # [batch, seq_len, 1]
         text_embedded_en = self.text_embed(text)
         text_embedded_lang = text_embed
-
 
         # Select embeddings based on mask
         out = torch.where(
