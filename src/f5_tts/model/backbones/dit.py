@@ -186,7 +186,7 @@ class TextEmbedding(nn.Module):
         # switch_cumsum == 1 means we're in an English region, == 0 means language region
         out = torch.where(
             switch_cumsum.bool(),
-            text_embedded_en,     # when switch_cumsum is 1 (English region), use English embeddings
+            text_embedded_lang,     # when switch_cumsum is 1 (English region), use English embeddings
             text_embedded_lang if text_embedded_lang is not None else text_embedded_en,   # when switch_cumsum is 0 (language region), use language embeddings
         )  # [batch, seq_len, emb_dim]
 
@@ -398,7 +398,7 @@ class DiT(nn.Module):
         # t: conditioning time, text: text, x: noised audio + cond audio + text
         t = self.time_embed(time)
         if lang == 'ro':
-            text_embed, vq_loss, _ = None, None, None # self.language_module(text, x.shape[1])
+            text_embed, vq_loss, _ = self.language_module(text, x.shape[1])
 
         if cfg_infer:  # pack cond & uncond forward: b n d -> 2b n d
             x_cond, _, _ = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False,
