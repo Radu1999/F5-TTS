@@ -58,46 +58,87 @@ class LanguageModule(nn.Module):
             num_quantizers=4
         ).to('cuda')
 
-    def forward(self, text: int["b nt"], seq_len):  # noqa: F722
-
-        text = text + 1  # use 0 as filler token. preprocess of batch pad -1, see list_str_to_idx()
+    def forward(self, text: torch.Tensor, seq_len: int):  # text: (b, nt)
+        # shift filler tokens
+        text = text + 1  # use 0 as filler token. preprocess of batch pad -1
         switch_lang = text == -1
         switch_cumsum = switch_lang.cumsum(dim=1) % 2  # Calculate before removing tokens
-        # Remove -1 tokens but keep the switch_cumsum for remaining tokens
+
+        # remove -1 tokens but keep switch_cumsum aligned
         text = text[~switch_lang].reshape(text.shape[0], -1)
         switch_cumsum = switch_cumsum[~switch_lang].reshape(text.shape[0], -1)
-        text = text[:, :seq_len]  # curtail if character tokens are more than the mel spec tokens
+
+        # curtail if too long
+        text = text[:, :seq_len]
         switch_cumsum = switch_cumsum[:, :seq_len]
 
         batch, text_len = text.shape[0], text.shape[1]
 
+        # pad to seq_len
         source_text = F.pad(text, (0, seq_len - text_len), value=0)
-        switch_cumsum = F.pad(switch_cumsum, (0, seq_len - text_len), value=1).bool()
-        source_text = source_text.masked_fill(switch_cumsum, 0)
+        switch_cumsum = F.pad(switch_cumsum, (0, seq_len - text_len), value=0)
+        source_text = source_text.masked_fill(switch_cumsum.bool(), 1)
 
+        # build mask
         if self.mask_padding:
             text_mask = source_text == 0
+        else:
+            text_mask = torch.zeros_like(source_text, dtype=torch.bool)
 
+        # embed
         text = self.text_embed(source_text)
         text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
-        # for block in self.text_blocks:
-        #     text = block(text)
-        #     text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
+        for block in self.text_blocks:
+            text = block(text)
+            text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
+
+        # process in chunks
+        # batch_size, seq_len, dim = text.shape
+        # out = torch.zeros_like(text)
+        #
+        # for b in range(batch_size):
+        #     seq = text[b]  # (seq_len, dim)
+        #     mask = text_mask[b]  # (seq_len,)
+        #     switches = switch_cumsum[b]  # (seq_len,)
+        #
+        #     # find chunk boundaries where switch_cumsum changes
+        #     # e.g., [0,0,0,1,1,0,0] → [(0,3), (3,5), (5,7)]
+        #     boundaries = torch.nonzero(switches[1:] != switches[:-1]).flatten() + 1
+        #     boundaries = torch.cat([
+        #         torch.tensor([0], device=seq.device),
+        #         boundaries,
+        #         torch.tensor([seq_len], device=seq.device)
+        #     ])
+        #
+        #     new_seq = []
+        #     for start, end in zip(boundaries[:-1], boundaries[1:]):
+        #         chunk = seq[start:end].unsqueeze(0)  # (1, chunk_len, dim)
+        #         chunk_mask = mask[start:end].unsqueeze(0)  # (1, chunk_len)
+        #
+        #         for block in self.text_blocks:
+        #             chunk = block(chunk)
+        #             chunk = chunk.masked_fill(chunk_mask.unsqueeze(-1).expand(-1, -1, dim), 0.0)
+        #
+        #         new_seq.append(chunk.squeeze(0))
+        #
+        #     # concatenate processed chunks back
+        #     out[b, :seq_len] = torch.cat(new_seq, dim=0)
 
         return text, None, None
-        z_q, encoding_indices, loss = self.vq(text)
-        z_q = z_q.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
-
-        return z_q, loss.mean(), encoding_indices
 
     def set_emb(self, embeddings):
         self.text_embed = embeddings
-        
+
 
 class TextEmbedding(nn.Module):
     def __init__(self, text_num_embeds, text_dim, mask_padding=True, conv_layers=0, conv_mult=2):
         super().__init__()
         self.text_embed = nn.Embedding(text_num_embeds + 1, text_dim)  # use 0 as filler token
+        
+        # Initialize with slightly better initialization for pronunciation
+        with torch.no_grad():
+            # Use Xavier initialization for better gradient flow
+            nn.init.xavier_uniform_(self.text_embed.weight, gain=0.8)
 
         self.mask_padding = mask_padding  # mask filler and batch padding tokens or not
 
@@ -141,10 +182,12 @@ class TextEmbedding(nn.Module):
         text_embedded_lang = text_embed
 
         # Select embeddings based on mask
+        # -1 tokens mean English, so switch_cumsum tracks English vs language regions
+        # switch_cumsum == 1 means we're in an English region, == 0 means language region
         out = torch.where(
             switch_cumsum.bool(),
-            text_embedded_en,
-            text_embedded_lang,
+            text_embedded_en,     # when switch_cumsum is 1 (English region), use English embeddings
+            text_embedded_lang if text_embedded_lang is not None else text_embedded_en,   # when switch_cumsum is 0 (language region), use language embeddings
         )  # [batch, seq_len, emb_dim]
 
         out = out.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, out.size(-1)), 0.0)
@@ -355,7 +398,7 @@ class DiT(nn.Module):
         # t: conditioning time, text: text, x: noised audio + cond audio + text
         t = self.time_embed(time)
         if lang == 'ro':
-            text_embed, vq_loss, _ = self.language_module(text, x.shape[1])
+            text_embed, vq_loss, _ = None, None, None # self.language_module(text, x.shape[1])
 
         if cfg_infer:  # pack cond & uncond forward: b n d -> 2b n d
             x_cond, _, _ = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False,

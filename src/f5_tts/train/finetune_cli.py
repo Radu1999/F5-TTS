@@ -199,7 +199,7 @@ def main():
     for p in model.parameters():
         p.requires_grad = False
 
-    for p in model.transformer.language_module.parameters():
+    for p in model.transformer.text_embed.parameters():
         p.requires_grad = True
 
     trainer = Trainer(
