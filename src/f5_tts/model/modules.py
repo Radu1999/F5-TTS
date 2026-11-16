@@ -74,6 +74,35 @@ def get_bigvgan_mel_spectrogram(
     return mel_spec
 
 
+def get_vocos_mel_spectrogram(
+        waveform,
+        n_fft=1024,
+        n_mel_channels=100,
+        target_sample_rate=24000,
+        hop_length=256,
+        win_length=1024,
+):
+    mel_stft = torchaudio.transforms.MelSpectrogram(
+        sample_rate=target_sample_rate,
+        n_fft=n_fft,
+        win_length=win_length,
+        hop_length=hop_length,
+        n_mels=n_mel_channels,
+        power=1,
+        center=True,
+        normalized=False,
+        norm=None,
+    ).to(waveform.device)
+    if len(waveform.shape) == 3:
+        waveform = waveform.squeeze(1)  # 'b 1 nw -> b nw'
+
+    assert len(waveform.shape) == 2
+
+    mel = mel_stft(waveform)
+    mel = mel.clamp(min=1e-5).log()
+    return mel
+
+
 class MelSpec(nn.Module):
     def __init__(
             self,
