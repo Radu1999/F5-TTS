@@ -14,7 +14,9 @@ def extract_speakers(threshold_db=-30):
     - Only include audio files with RMS amplitude above threshold_db
     """
 
-    tsv_path = r"C:\Users\Mihaitza\Desktop\F5-TTS\data\ro_tts_common_pinyin\cv-corpus-22.0-2025-06-20\ro\validated.tsv"
+    tsv_path = os.path.join("data", "ro_tts_common_pinyin", "cv-corpus-22.0-2025-06-20", "ro", "validated.tsv")
+
+    wavs_dir = os.path.join("data", "ro_tts_common_pinyin", "wavs")
 
     print("Reading validated.tsv file...")
     df = pd.read_csv(tsv_path, sep='\t')
@@ -68,7 +70,7 @@ def extract_speakers(threshold_db=-30):
             # Shuffle to randomize selection
             random.shuffle(candidates)
             for cand in candidates:
-                if is_loud_enough(cand['path'], threshold_db):
+                if is_loud_enough(os.path.join(wavs_dir, cand['path']), threshold_db):
                     selected_speakers.append(cand)
                     break  # Only one per age/gender first
         if len(selected_speakers) >= 8:  # 2 per age group
@@ -78,8 +80,8 @@ def extract_speakers(threshold_db=-30):
     all_remaining = []
     for (age, gender), speakers in grouped.items():
         for speaker in speakers:
-            path = r"C:\Users\Mihaitza\Desktop\F5-TTS\data\ro_tts_common_pinyin\wavs"
-            if speaker not in selected_speakers and is_loud_enough(path + "\\" +  speaker['path'].split('.')[0] + '.wav', threshold_db):
+            wav_path = os.path.join(wavs_dir, speaker['path'].split('.')[0] + '.wav')
+            if speaker not in selected_speakers and is_loud_enough(wav_path, threshold_db):
                 all_remaining.append(speaker)
 
     while len(selected_speakers) < 10 and all_remaining:

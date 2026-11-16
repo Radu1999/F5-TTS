@@ -37,12 +37,12 @@ _ref_text_cache = {}
 
 device = (
     "cuda"
-    # if torch.cuda.is_available()
-    # else "xpu"
-    # if torch.xpu.is_available()
-    # else "mps"
-    # if torch.backends.mps.is_available()
-    # else "cpu"
+    if torch.cuda.is_available()
+    else "xpu"
+    if torch.xpu.is_available()
+    else "mps"
+    if torch.backends.mps.is_available()
+    else "cpu"
 )
 
 tempfile_kwargs = {"delete_on_close": False} if sys.version_info >= (3, 12) else {"delete": False}

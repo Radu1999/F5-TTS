@@ -1,4 +1,5 @@
 import json
+import os
 import random
 from importlib.resources import files
 
@@ -93,6 +94,7 @@ class CustomDataset(Dataset):
         mel_spec_type="vocos",
         preprocessed_mel=False,
         mel_spec_module: nn.Module | None = None,
+        data_dir: str | None = None,
     ):
         self.data = custom_dataset
         if custom_dataset[0].get("speaker", None) != None:
@@ -109,6 +111,7 @@ class CustomDataset(Dataset):
         self.win_length = win_length
         self.mel_spec_type = mel_spec_type
         self.preprocessed_mel = preprocessed_mel
+        self.data_dir = data_dir
 
         if not preprocessed_mel:
             self.mel_spectrogram = default(
@@ -136,7 +139,9 @@ class CustomDataset(Dataset):
     def __getitem__(self, index):
         while True:
             row = self.data[index]
-            audio_path = '../../../' + row["audio_path"]
+            audio_path = row["audio_path"]
+            if not os.path.isabs(audio_path) and self.data_dir is not None:
+                audio_path = os.path.join(self.data_dir, audio_path)
             text = row["text"]
             duration = row["duration"]
             label = row.get("speaker", random.randint(1, 300))
@@ -284,6 +289,7 @@ def load_dataset(
         train_dataset = CustomDataset(
             train_dataset,
             durations=durations,
+            data_dir=rel_data_path,
             preprocessed_mel=preprocessed_mel,
             mel_spec_module=mel_spec_module,
             **mel_spec_kwargs,
