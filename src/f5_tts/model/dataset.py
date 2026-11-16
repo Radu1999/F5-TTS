@@ -136,7 +136,7 @@ class CustomDataset(Dataset):
     def __getitem__(self, index):
         while True:
             row = self.data[index]
-            audio_path = row["audio_path"]
+            audio_path = '../../../' + row["audio_path"]
             text = row["text"]
             duration = row["duration"]
             label = row.get("speaker", random.randint(1, 300))
