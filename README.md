@@ -210,6 +210,56 @@ f5-tts_finetune-gradio
 
 Read [training & finetuning guidance](src/f5_tts/train) for more instructions.
 
+### 3. Finetuning with / without the ConvNeXt module
+
+The DiT backbone encodes text with a learned embedding plus an **optional stack of ConvNeXt-V2 blocks** (together with sinusoidal positional embeddings) on top of it — see `TextEmbedding` in `src/f5_tts/model/backbones/dit.py`. The number of blocks is the architecture parameter `conv_layers`:
+
+| `conv_layers` | text encoder |
+|---|---|
+| `4` (all shipped F5TTS configs, the default) | embedding + 4 × ConvNeXt-V2 blocks (+ sinusoidal pos. embedding) |
+| `0` | plain embedding only (no ConvNeXt blocks, no text-side positional embedding) |
+
+Note: the code-switching `LanguageModule` used for `lang='ro'` training has its own 4 ConvNeXt-V2 blocks, which are *not* controlled by `conv_layers`.
+
+#### With ConvNeXt (default)
+
+All shipped paths already use `conv_layers=4` — nothing to change. E.g. the CLI trainer used by `run_training.sh`:
+
+```bash
+accelerate launch src/f5_tts/train/finetune_cli.py \
+    --exp_name F5TTS_v1_Base --finetune --pretrain <path/to/pretrained.ckpt> \
+    --dataset_name ro_tts --epochs 50 --learning_rate 1e-4 \
+    --batch_size_per_gpu 16384 --max_samples 128 --logger wandb
+```
+
+or the hydra config:
+
+```bash
+accelerate launch src/f5_tts/train/train.py --config-name F5TTS_v1_Base.yaml
+```
+
+Note that `finetune_cli.py` freezes the whole model except `transformer.language_module` parameters — that is the part actually trained there.
+
+#### Without ConvNeXt
+
+Build the model without the block stack by setting `conv_layers=0`:
+
+- **hydra / `train.py` path** — override the config:
+
+  ```bash
+  accelerate launch src/f5_tts/train/train.py --config-name F5TTS_v1_Base.yaml ++model.arch.conv_layers=0
+  ```
+
+  The standard trainer (`src/f5_tts/model/trainer.py`) loads `pretrained_*` checkpoints *strictly*, so initializing from the official F5TTS checkpoints will fail on the extra `text_blocks.*` tensors — either remove those keys from the checkpoint beforehand, or start from scratch.
+
+- **CLI path (`finetune_cli.py`)** — `conv_layers=4` is hardcoded in the `model_cfg` dict; set it to `0` there. Its trainer (`src/f5_tts/model/language_trainer.py`) loads the pretrained checkpoint with `strict=False`, so the ConvNeXt tensors are silently dropped and all remaining weights initialize as usual.
+
+When flipping between the two variants, also change the checkpoint dir (`++model.name=...` or `--checkpoint_path ...`) so the runs do not share (or overwrite) the same `ckpts/` folder.
+
+#### Inference
+
+Load a checkpoint with the same `conv_layers` you trained with — checkpoint loading is strict. For no-ConvNeXt checkpoints pass `conv_layers: 0` in the model cfg of `load_model(...)`; for the standard ones use `conv_layers: 4`.
+
 
 ## [Evaluation](src/f5_tts/eval)
 

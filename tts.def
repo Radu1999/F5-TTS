@@ -1,0 +1,42 @@
+Bootstrap: docker
+From:nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+
+%environment
+    export LC_ALL=C.UTF-8
+    export LANG=C.UTF-8
+    export PYTHONUNBUFFERED=1
+    export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+
+%post
+    # Update package lists and install system dependencies
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        cmake \
+        git \
+        curl \
+        ca-certificates \
+        libjpeg-dev \
+        libpng-dev \
+        python3 python3-pip \
+	ffmpeg \
+        python3-venv \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/*
+
+    # Correct way to upgrade pip
+    python3 -m pip install --upgrade pip
+
+    # Install PyTorch with CUDA 12.1 support
+    pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+    # Install your package in editable mode
+    git clone https://github.com/Radu1999/F5-TTS
+    cd F5-TTS
+    pip install -e .
+
+
+%runscript
+    exec python "$@"
+
+%startscript
+    exec python "$@"
