@@ -50,9 +50,10 @@ from f5_tts.model import DiT, UNetT
 DEFAULT_TTS_MODEL = "F5-TTS_v1"
 tts_model_choice = DEFAULT_TTS_MODEL
 
+# Ro-F5TTS (arXiv:2512.12297): finetuned Romanian checkpoint + Romanian vocab
 DEFAULT_TTS_MODEL_CFG = [
-    r"C:\Users\Mihaitza\Desktop\F5-TTS\checkpoints\model_last.pt",
-    r"C:\Users\Mihaitza\Desktop\F5-TTS\data\ro_tts_pinyin\vocab.txt",
+    str(files("f5_tts").joinpath("../../../ckpts/ro_tts_lang_mod/model_last.pt")),
+    str(files("f5_tts").joinpath("../../../data/ro_tts_pinyin/vocab.txt")),
     json.dumps(dict(dim=1024, depth=22, heads=16, ff_mult=2, text_dim=512, conv_layers=4)),
 ]
 
@@ -63,7 +64,9 @@ vocoder = load_vocoder()
 
 
 def load_f5tts():
-    ckpt_path = str(cached_path(DEFAULT_TTS_MODEL_CFG[0]))
+    ckpt_path = DEFAULT_TTS_MODEL_CFG[0]
+    if ckpt_path.startswith("hf://"):
+        ckpt_path = str(cached_path(ckpt_path))
     F5TTS_model_cfg = json.loads(DEFAULT_TTS_MODEL_CFG[2])
     return load_model(DiT, F5TTS_model_cfg, ckpt_path, vocab_file=DEFAULT_TTS_MODEL_CFG[1])
 
@@ -950,7 +953,7 @@ This is {"a local web UI for [F5 TTS](https://github.com/SWivid/F5-TTS)" if not 
 * [F5-TTS](https://arxiv.org/abs/2410.06885) (A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching)
 * [E2 TTS](https://arxiv.org/abs/2406.18009) (Embarrassingly Easy Fully Non-Autoregressive Zero-Shot TTS)
 
-The checkpoints currently support English and Chinese.
+The default checkpoint is Ro-F5TTS (arXiv:2512.12297), a Romanian TTS model; the E2-TTS option supports English and Chinese.
 
 If you're having issues, try converting your reference audio to WAV or MP3, clipping it to 12s with  ✂  in the bottom right corner (otherwise might have non-optimal auto-trimmed result).
 

@@ -1,229 +1,131 @@
-# F5-TTS: A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching
+# Ro-F5TTS: Romanian TTS via Lightweight Input Adaptation
 
-[![python](https://img.shields.io/badge/Python-3.10-brightgreen)](https://github.com/SWivid/F5-TTS)
-[![arXiv](https://img.shields.io/badge/arXiv-2410.06885-b31b1b.svg?logo=arXiv)](https://arxiv.org/abs/2410.06885)
-[![demo](https://img.shields.io/badge/GitHub-Demo%20page-orange.svg)](https://swivid.github.io/F5-TTS/)
-[![hfspace](https://img.shields.io/badge/🤗-Space%20demo-yellow)](https://huggingface.co/spaces/mrfakename/E2-F5-TTS)
-[![msspace](https://img.shields.io/badge/🤖-Space%20demo-blue)](https://modelscope.cn/studios/modelscope/E2-F5-TTS)
-[![lab](https://img.shields.io/badge/X--LANCE-Lab-grey?labelColor=lightgrey)](https://x-lance.sjtu.edu.cn/)
-[![lab](https://img.shields.io/badge/Peng%20Cheng-Lab-grey?labelColor=lightgrey)](https://www.pcl.ac.cn)
-<!-- <img src="https://github.com/user-attachments/assets/12d7749c-071a-427c-81bf-b87b91def670" alt="Watermark" style="width: 40px; height: auto"> -->
+**F5-TTS-RO: Extending F5-TTS to Romanian TTS via Lightweight Input Adaptation**
+(Radu-Gabriel Chivereanu, Tiberiu Boros) —
+[arXiv:2512.12297](https://arxiv.org/abs/2512.12297), accepted at LREC-COLING 2026.
 
-**F5-TTS**: Diffusion Transformer with ConvNeXt V2, faster trained and inference.
+This repository is a fork of [F5-TTS](https://github.com/SWivid/F5-TTS) implementing the
+paper's method: a **frozen F5-TTS backbone + a lightweight input-level adapter** that
+extends the text encoder to Romanian while preserving the model's existing capabilities
+(voice cloning, English and Chinese). Example audio:
+[github.com/racai-ro/Ro-F5TTS](https://github.com/racai-ro/Ro-F5TTS).
 
-**E2 TTS**: Flat-UNet Transformer, closest reproduction from [paper](https://arxiv.org/abs/2406.18009).
+## Method
 
-**Sway Sampling**: Inference-time flow step sampling strategy, greatly improves performance
+Instead of finetuning the whole model, Ro-F5TTS appends a small sub-network on the text
+input side and trains only that, keeping all original weights frozen:
 
-### Thanks to all the contributors !
-
-## News
-- **2025/03/12**: 🔥 F5-TTS v1 base model with better training and inference performance. [Few demo](https://swivid.github.io/F5-TTS_updates).
-- **2024/10/08**: F5-TTS & E2 TTS base models on [🤗 Hugging Face](https://huggingface.co/SWivid/F5-TTS), [🤖 Model Scope](https://www.modelscope.cn/models/SWivid/F5-TTS_Emilia-ZH-EN), [🟣 Wisemodel](https://wisemodel.cn/models/SJTU_X-LANCE/F5-TTS_Emilia-ZH-EN).
-
-## Installation
-
-### Create a separate environment if needed
-
-```bash
-# Create a python 3.10 conda env (you could also use virtualenv)
-conda create -n f5-tts python=3.10
-conda activate f5-tts
+```
+ŷ = TTS( ConvNeXt( E_R(x) ) )
 ```
 
-### Install PyTorch with matched device
+- `E_R(x)` — a new character-level embedding matrix for the Romanian vocabulary,
+  initialized as a copy of the frozen F5-TTS embedding (see `Trainer.train` in
+  `src/f5_tts/model/language_trainer.py`).
+- `ConvNeXt(·)` — a stack of 4 ConvNeXt-V2 blocks (dim 512) modeling the
+  co-dependencies between the character embeddings — a "soft" letter-to-sound layer.
 
-<details>
-<summary>NVIDIA GPU</summary>
+The adapter's output replaces the text embedding fed to the frozen text encoder.
+This is `LanguageModule` in `src/f5_tts/model/backbones/dit.py` (checkpoint keys
+`transformer.language_module.text_embed.*` and `transformer.language_module.text_blocks.*`).
+`src/f5_tts/train/finetune_cli.py` freezes all parameters except
+`transformer.language_module.parameters()`.
 
-> ```bash
-> # Install pytorch with your CUDA version, e.g.
-> pip install torch==2.4.0+cu124 torchaudio==2.4.0+cu124 --extra-index-url https://download.pytorch.org/whl/cu124
-> ```
+### Code switching
 
-</details>
-
-<details>
-<summary>AMD GPU</summary>
-
-> ```bash
-> # Install pytorch with your ROCm version (Linux only), e.g.
-> pip install torch==2.5.1+rocm6.2 torchaudio==2.5.1+rocm6.2 --extra-index-url https://download.pytorch.org/whl/rocm6.2
-> ```
-
-</details>
-
-<details>
-<summary>Intel GPU</summary>
-
-> ```bash
-> # Install pytorch with your XPU version, e.g.
-> # Intel® Deep Learning Essentials or Intel® oneAPI Base Toolkit must be installed
-> pip install torch torchaudio --index-url https://download.pytorch.org/whl/test/xpu
-> 
-> # Intel GPU support is also available through IPEX (Intel® Extension for PyTorch)
-> # IPEX does not require the Intel® Deep Learning Essentials or Intel® oneAPI Base Toolkit
-> # See: https://pytorch-extension.intel.com/installation?request=platform
-> ```
-
-</details>
-
-<details>
-<summary>Apple Silicon</summary>
-
-> ```bash
-> # Install the stable pytorch, e.g.
-> pip install torch torchaudio
-> ```
-
-</details>
-
-### Then you can choose one from below:
-
-> ### 1. As a pip package (if just for inference)
-> 
-> ```bash
-> pip install f5-tts
-> ```
-> 
-> ### 2. Local editable (if also do training, finetuning)
-> 
-> ```bash
-> git clone https://github.com/SWivid/F5-TTS.git
-> cd F5-TTS
-> # git submodule update --init --recursive  # (optional, if use bigvgan as vocoder)
-> pip install -e .
-> ```
-
-### Docker usage also available
-```bash
-# Build from Dockerfile
-docker build -t f5tts:v1 .
-
-# Run from GitHub Container Registry
-docker container run --rm -it --gpus=all --mount 'type=volume,source=f5-tts,target=/root/.cache/huggingface/hub/' -p 7860:7860 ghcr.io/swivid/f5-tts:main
-
-# Quickstart if you want to just run the web interface (not CLI)
-docker container run --rm -it --gpus=all --mount 'type=volume,source=f5-tts,target=/root/.cache/huggingface/hub/' -p 7860:7860 ghcr.io/swivid/f5-tts:main f5-tts_infer-gradio --host 0.0.0.0
-```
-
-### Runtime
-
-Deployment solution with Triton and TensorRT-LLM.
-
-#### Benchmark Results
-Decoding on a single L20 GPU, using 26 different prompt_audio & target_text pairs, 16 NFE.
-
-| Model               | Concurrency    | Avg Latency | RTF    | Mode            |
-|---------------------|----------------|-------------|--------|-----------------|
-| F5-TTS Base (Vocos) | 2              | 253 ms      | 0.0394 | Client-Server   |
-| F5-TTS Base (Vocos) | 1 (Batch_size) | -           | 0.0402 | Offline TRT-LLM |
-| F5-TTS Base (Vocos) | 1 (Batch_size) | -           | 0.1467 | Offline Pytorch |
-
-See [detailed instructions](src/f5_tts/runtime/triton_trtllm/README.md) for more information.
-
-
-## Inference
-
-- In order to achieve desired performance, take a moment to read [detailed guidance](src/f5_tts/infer).
-- By properly searching the keywords of problem encountered, [issues](https://github.com/SWivid/F5-TTS/issues?q=is%3Aissue) are very helpful.
-
-### 1. Gradio App
-
-Currently supported features:
-
-- Basic TTS with Chunk Inference
-- Multi-Style / Multi-Speaker Generation
-- Voice Chat powered by Qwen2.5-3B-Instruct
-- [Custom inference with more language support](src/f5_tts/infer/SHARED.md)
-
-```bash
-# Launch a Gradio app (web interface)
-f5-tts_infer-gradio
-
-# Specify the port/host
-f5-tts_infer-gradio --port 7860 --host 0.0.0.0
-
-# Launch a share link
-f5-tts_infer-gradio --share
-```
-
-<details>
-<summary>NVIDIA device docker compose file example</summary>
-
-```yaml
-services:
-  f5-tts:
-    image: ghcr.io/swivid/f5-tts:main
-    ports:
-      - "7860:7860"
-    environment:
-      GRADIO_SERVER_PORT: 7860
-    entrypoint: ["f5-tts_infer-gradio", "--port", "7860", "--host", "0.0.0.0"]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
-volumes:
-  f5-tts:
-    driver: local
-```
-
-</details>
-
-### 2. CLI Inference
-
-```bash
-# Run with flags
-# Leave --ref_text "" will have ASR model transcribe (extra GPU memory usage)
-f5-tts_infer-cli --model F5TTS_v1_Base \
---ref_audio "provide_prompt_wav_path_here.wav" \
---ref_text "The content, subtitle or transcription of reference audio." \
---gen_text "Some text you want TTS model generate for you."
-
-# Run with default setting. src/f5_tts/infer/examples/basic/basic.toml
-f5-tts_infer-cli
-# Or with your own .toml file
-f5-tts_infer-cli -c custom.toml
-
-# Multi voice. See src/f5_tts/infer/README.md
-f5-tts_infer-cli -c src/f5_tts/infer/examples/multi/story.toml
-```
-
+In mixed Romanian–English text, `~` marks a language switch. The switch token is removed
+from the sequence and a cumulative region flag is kept; the adapter processes the whole
+sequence (non-Romanian regions are fed a placeholder id) and its output then passes
+through the original frozen ConvNeXt text encoder. See `LanguageModule.forward` and
+`TextEmbedding.forward` in `src/f5_tts/model/backbones/dit.py`.
 
 ## Training
 
-### 1. With Hugging Face Accelerate
+Data: Romanian audio + transcripts (SWARA corpus in the paper), prepared under
+`data/ro_tts_pinyin/` with the `pinyin` tokenizer (non-Chinese characters pass through
+unchanged) and its `vocab.txt`.
 
-Refer to [training & finetuning guidance](src/f5_tts/train) for best practice.
+Paper setup (Table 1):
 
-### 2. With Gradio App
+| parameter | value |
+|---|---|
+| learning rate | 1e-4 |
+| batch size | 16384 frames (≤ 128 samples) |
+| warmup updates | 50 |
+| total updates | 40500 |
+| hardware | 1× A100, ~12 h |
+
+`run_training.sh` wraps the exact command:
 
 ```bash
-# Quick start with Gradio web interface
-f5-tts_finetune-gradio
+export WANDB_API_KEY=<key>   # or: wandb login
+accelerate launch src/f5_tts/train/finetune_cli.py --logger wandb --dataset_name ro_tts \
+    --num_warmup_updates 50 --last_per_updates 2000 --log_samples \
+    --learning_rate 1e-4 --save_per_updates 300 \
+    --batch_size_per_gpu 16384 --max_samples 128 --keep_last_n_checkpoints 3 \
+    --epochs 50 --checkpoint_path ro_tts_lang_mod
 ```
 
-Read [training & finetuning guidance](src/f5_tts/train) for more instructions.
+Checkpoints are written to `ckpts/ro_tts_lang_mod/` (`model_last.pt` + rotated
+`model_<update>.pt`).
 
-### 3. Finetuning with / without the ConvNeXt module
+> **Note** — the pretrained F5-TTS v1 base checkpoint must be available to the trainer:
+> either place it in `ckpts/ro_tts_lang_mod/` as `pretrained_model_1250000.safetensors`,
+> or launch with `--finetune --pretrain <path/to/model_1250000.safetensors>` (it will be
+> copied into the checkpoint dir as `pretrained_*`). Without it, `language_trainer.py`
+> prints "No pretrained model found" and the backbone starts from scratch.
 
-The DiT backbone encodes text with a learned embedding plus an **optional stack of ConvNeXt-V2 blocks** (together with sinusoidal positional embeddings) on top of it — see `TextEmbedding` in `src/f5_tts/model/backbones/dit.py`. The number of blocks is the architecture parameter `conv_layers`:
+### SLURM (UPB cluster)
+
+`sbatch submit_job.sh` runs `run_training.sh` inside the `tts.sif` Singularity image on
+`dgxa100`, with `data/` and `ckpts/` bind-mounted.
+
+## Inference
+
+### CLI
+
+```bash
+f5-tts_infer-cli \
+    --model F5TTS_v1_Base \
+    --ckpt_file ckpts/ro_tts_lang_mod/model_last.pt \
+    --vocab_file data/ro_tts_pinyin/vocab.txt \
+    --ref_audio "reference.wav" \
+    --ref_text "Transcrierea audio de referință." \
+    --gen_text "Text de sintetizat, cu span-uri engleze separate de ~."
+```
+
+`--ckpt_file` / `--vocab_file` default to exactly the paths above, so after training a
+plain `f5-tts_infer-cli --ref_audio ... --ref_text ... --gen_text ...` works.
+`model_last.pt` is a full trainer checkpoint; its EMA weights are loaded automatically.
+
+### Gradio web UI
+
+```bash
+f5-tts_infer-gradio --port 7860
+```
+
+The default model is the local Romanian checkpoint; the E2-TTS option stays available
+for English/Chinese.
+
+## Finetuning with / without the ConvNeXt module
+
+The DiT backbone encodes text with a learned embedding plus an **optional stack of
+ConvNeXt-V2 blocks** (together with sinusoidal positional embeddings) on top of it — see
+`TextEmbedding` in `src/f5_tts/model/backbones/dit.py`. The number of blocks is the
+architecture parameter `conv_layers`:
 
 | `conv_layers` | text encoder |
 |---|---|
 | `4` (all shipped F5TTS configs, the default) | embedding + 4 × ConvNeXt-V2 blocks (+ sinusoidal pos. embedding) |
 | `0` | plain embedding only (no ConvNeXt blocks, no text-side positional embedding) |
 
-Note: the code-switching `LanguageModule` used for `lang='ro'` training has its own 4 ConvNeXt-V2 blocks, which are *not* controlled by `conv_layers`.
+Note: the code-switching `LanguageModule` used for `lang='ro'` training has its own 4
+ConvNeXt-V2 blocks, which are *not* controlled by `conv_layers`.
 
 #### With ConvNeXt (default)
 
-All shipped paths already use `conv_layers=4` — nothing to change. E.g. the CLI trainer used by `run_training.sh`:
+All shipped paths already use `conv_layers=4` — nothing to change. E.g. the CLI trainer
+used by `run_training.sh`:
 
 ```bash
 accelerate launch src/f5_tts/train/finetune_cli.py \
@@ -238,7 +140,8 @@ or the hydra config:
 accelerate launch src/f5_tts/train/train.py --config-name F5TTS_v1_Base.yaml
 ```
 
-Note that `finetune_cli.py` freezes the whole model except `transformer.language_module` parameters — that is the part actually trained there.
+Note that `finetune_cli.py` freezes the whole model except `transformer.language_module`
+parameters — that is the part actually trained there.
 
 #### Without ConvNeXt
 
@@ -250,55 +153,61 @@ Build the model without the block stack by setting `conv_layers=0`:
   accelerate launch src/f5_tts/train/train.py --config-name F5TTS_v1_Base.yaml ++model.arch.conv_layers=0
   ```
 
-  The standard trainer (`src/f5_tts/model/trainer.py`) loads `pretrained_*` checkpoints *strictly*, so initializing from the official F5TTS checkpoints will fail on the extra `text_blocks.*` tensors — either remove those keys from the checkpoint beforehand, or start from scratch.
+  The standard trainer (`src/f5_tts/model/trainer.py`) loads `pretrained_*` checkpoints
+  *strictly*, so initializing from the official F5TTS checkpoints will fail on the extra
+  `text_blocks.*` tensors — either remove those keys from the checkpoint beforehand, or
+  start from scratch.
 
-- **CLI path (`finetune_cli.py`)** — `conv_layers=4` is hardcoded in the `model_cfg` dict; set it to `0` there. Its trainer (`src/f5_tts/model/language_trainer.py`) loads the pretrained checkpoint with `strict=False`, so the ConvNeXt tensors are silently dropped and all remaining weights initialize as usual.
+- **CLI path (`finetune_cli.py`)** — `conv_layers=4` is hardcoded in the `model_cfg`
+  dict; set it to `0` there. Its trainer (`src/f5_tts/model/language_trainer.py`) loads
+  the pretrained checkpoint with `strict=False`, so the ConvNeXt tensors are silently
+  dropped and all remaining weights initialize as usual.
 
-When flipping between the two variants, also change the checkpoint dir (`++model.name=...` or `--checkpoint_path ...`) so the runs do not share (or overwrite) the same `ckpts/` folder.
+When flipping between the two variants, also change the checkpoint dir
+(`++model.name=...` or `--checkpoint_path ...`) so the runs do not share (or overwrite)
+the same `ckpts/` folder.
 
 #### Inference
 
-Load a checkpoint with the same `conv_layers` you trained with — checkpoint loading is strict. For no-ConvNeXt checkpoints pass `conv_layers: 0` in the model cfg of `load_model(...)`; for the standard ones use `conv_layers: 4`.
+Load a checkpoint with the same `conv_layers` you trained with — checkpoint loading is
+strict. For no-ConvNeXt checkpoints pass `conv_layers: 0` in the model cfg of
+`load_model(...)`; for the standard ones use `conv_layers: 4`.
 
+## Evaluation
 
-## [Evaluation](src/f5_tts/eval)
+`src/f5_tts/train/compare.py` generates speech from the pretrained and finetuned
+checkpoints for the same reference/text pairs (the paper's pre/post comparison).
 
-
-## Development
-
-Use pre-commit to ensure code quality (will run linters and formatters automatically):
-
-```bash
-pip install pre-commit
-pre-commit install
-```
-
-When making a pull request, before each commit, run: 
+## Installation
 
 ```bash
-pre-commit run --all-files
+# Python 3.10 environment
+conda create -n f5-tts python=3.10
+conda activate f5-tts
+
+# PyTorch for your device, e.g.
+pip install torch==2.4.0+cu124 torchaudio==2.4.0+cu124 --extra-index-url https://download.pytorch.org/whl/cu124
+
+# install (editable, since training is part of the repo)
+pip install -e .
 ```
-
-Note: Some model components have linting exceptions for E722 to accommodate tensor notation.
-
-
-## Acknowledgements
-
-- [E2-TTS](https://arxiv.org/abs/2406.18009) brilliant work, simple and effective
-- [Emilia](https://arxiv.org/abs/2407.05361), [WenetSpeech4TTS](https://arxiv.org/abs/2406.05763), [LibriTTS](https://arxiv.org/abs/1904.02882), [LJSpeech](https://keithito.com/LJ-Speech-Dataset/) valuable datasets
-- [lucidrains](https://github.com/lucidrains) initial CFM structure with also [bfs18](https://github.com/bfs18) for discussion
-- [SD3](https://arxiv.org/abs/2403.03206) & [Hugging Face diffusers](https://github.com/huggingface/diffusers) DiT and MMDiT code structure
-- [torchdiffeq](https://github.com/rtqichen/torchdiffeq) as ODE solver, [Vocos](https://huggingface.co/charactr/vocos-mel-24khz) and [BigVGAN](https://github.com/NVIDIA/BigVGAN) as vocoder
-- [FunASR](https://github.com/modelscope/FunASR), [faster-whisper](https://github.com/SYSTRAN/faster-whisper), [UniSpeech](https://github.com/microsoft/UniSpeech), [SpeechMOS](https://github.com/tarepan/SpeechMOS) for evaluation tools
-- [ctc-forced-aligner](https://github.com/MahmoudAshraf97/ctc-forced-aligner) for speech edit test
-- [mrfakename](https://x.com/realmrfakename) huggingface space demo ~
-- [f5-tts-mlx](https://github.com/lucasnewman/f5-tts-mlx/tree/main) Implementation with MLX framework by [Lucas Newman](https://github.com/lucasnewman)
-- [F5-TTS-ONNX](https://github.com/DakeQQ/F5-TTS-ONNX) ONNX Runtime version by [DakeQQ](https://github.com/DakeQQ)
-- [Yuekai Zhang](https://github.com/yuekaizhang) Triton and TensorRT-LLM support ~
 
 ## Citation
-If our work and codebase is useful for you, please cite as:
+
+If you use Ro-F5TTS, please cite:
+
+```bibtex
+@inproceedings{chivereanu-boros-2026-f5ts-ro,
+  title     = {F5-TTS-RO: Extending F5-TTS to Romanian TTS via Lightweight Input Adaptation},
+  author    = {Chivereanu, Radu-Gabriel and Boros, Tiberiu},
+  booktitle = {Proceedings of LREC-COLING 2026},
+  year      = {2026}
+}
 ```
+
+and the base model:
+
+```bibtex
 @article{chen-etal-2024-f5tts,
       title={F5-TTS: A Fairytaler that Fakes Fluent and Faithful Speech with Flow Matching}, 
       author={Yushen Chen and Zhikang Niu and Ziyang Ma and Keqi Deng and Chunhui Wang and Jian Zhao and Kai Yu and Xie Chen},
@@ -306,6 +215,8 @@ If our work and codebase is useful for you, please cite as:
       year={2024},
 }
 ```
+
 ## License
 
-Our code is released under MIT License. The pre-trained models are licensed under the CC-BY-NC license due to the training data Emilia, which is an in-the-wild dataset. Sorry for any inconvenience this may cause.
+Code is released under MIT License. The pre-trained F5-TTS models are licensed under the
+CC-BY-NC license due to the training data Emilia, which is an in-the-wild dataset.

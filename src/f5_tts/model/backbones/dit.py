@@ -13,14 +13,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from x_transformers.x_transformers import RotaryEmbedding
-from transformers import AutoModel, AutoTokenizer
-from vector_quantize_pytorch import ResidualSimVQ, VectorQuantize, ResidualVQ, SimVQ
-import matplotlib.pyplot as plt
-# import seaborn as sns
-import numpy as np
-from sklearn.decomposition import PCA
-import os
-from f5_tts.model.backbones.grad_reversal import GradientReversal
 
 from f5_tts.model.modules import (
     AdaLayerNorm_Final,
@@ -30,17 +22,19 @@ from f5_tts.model.modules import (
     TimestepEmbedding,
     get_pos_embed_indices,
     precompute_freqs_cis,
-    VQEmbedding
-)
-
-from f5_tts.model.utils import (
-    list_str_to_idx,
-    list_str_to_tensor,
-    exists
 )
 
 
 class LanguageModule(nn.Module):
+    """Input-level adapter that extends F5-TTS to Romanian (arXiv:2512.12297).
+
+    A new character embedding matrix (initialized as a copy of the frozen F5-TTS
+    embedding, see Trainer) plus a stack of ConvNeXt-V2 blocks that model the
+    co-dependencies between the new character embeddings — a "soft"
+    letter-to-sound layer. Its output replaces the text embedding fed to the
+    frozen F5-TTS backbone. Everything outside this module is kept frozen.
+    """
+
     def __init__(self, text_num_embeds=256, text_dim=None, conv_mult=2, conv_layers=4,
                  mask_padding=True, embeddings=None):
         super().__init__()
@@ -52,11 +46,6 @@ class LanguageModule(nn.Module):
         else:
             self.text_embed = embeddings
         self.mask_padding = mask_padding
-        self.vq = ResidualVQ(
-            dim=text_dim,
-            codebook_size=512,
-            num_quantizers=4
-        ).to('cuda')
 
     def forward(self, text: torch.Tensor, seq_len: int):  # text: (b, nt)
         # shift filler tokens
@@ -92,39 +81,7 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
-        # process in chunks
-        # batch_size, seq_len, dim = text.shape
-        # out = torch.zeros_like(text)
-        #
-        # for b in range(batch_size):
-        #     seq = text[b]  # (seq_len, dim)
-        #     mask = text_mask[b]  # (seq_len,)
-        #     switches = switch_cumsum[b]  # (seq_len,)
-        #
-        #     # find chunk boundaries where switch_cumsum changes
-        #     # e.g., [0,0,0,1,1,0,0] → [(0,3), (3,5), (5,7)]
-        #     boundaries = torch.nonzero(switches[1:] != switches[:-1]).flatten() + 1
-        #     boundaries = torch.cat([
-        #         torch.tensor([0], device=seq.device),
-        #         boundaries,
-        #         torch.tensor([seq_len], device=seq.device)
-        #     ])
-        #
-        #     new_seq = []
-        #     for start, end in zip(boundaries[:-1], boundaries[1:]):
-        #         chunk = seq[start:end].unsqueeze(0)  # (1, chunk_len, dim)
-        #         chunk_mask = mask[start:end].unsqueeze(0)  # (1, chunk_len)
-        #
-        #         for block in self.text_blocks:
-        #             chunk = block(chunk)
-        #             chunk = chunk.masked_fill(chunk_mask.unsqueeze(-1).expand(-1, -1, dim), 0.0)
-        #
-        #         new_seq.append(chunk.squeeze(0))
-        #
-        #     # concatenate processed chunks back
-        #     out[b, :seq_len] = torch.cat(new_seq, dim=0)
-
-        return text, None, None
+        return text
 
     def set_emb(self, embeddings):
         self.text_embed = embeddings
@@ -259,9 +216,10 @@ class DiT(nn.Module):
         super().__init__()
 
         self.time_embed = TimestepEmbedding(dim)
-        self.language_module = LanguageModule(text_num_embeds=text_num_embeds, text_dim=text_dim)
         if text_dim is None:
             text_dim = mel_dim
+        # Romanian input adapter (arXiv:2512.12297); the rest of the model stays frozen
+        self.language_module = LanguageModule(text_num_embeds=text_num_embeds, text_dim=text_dim)
         self.text_embed = TextEmbedding(
             text_num_embeds, text_dim, mask_padding=text_mask_padding, conv_layers=conv_layers
         )
@@ -296,28 +254,6 @@ class DiT(nn.Module):
 
         self.checkpoint_activations = checkpoint_activations
 
-        # self.vq = VectorQuantize(
-        #     dim=512,
-        #     codebook_size=512,
-        #     decay=0.8,
-        #     commitment_weight=1.
-        # ).to('cuda')
-
-        self.vq = ResidualVQ(
-            dim=512,
-            num_quantizers=8,
-            codebook_size=512,
-        )
-
-        self.criterion = nn.CrossEntropyLoss()
-
-        # self.classifier = nn.Sequential(
-        #     GradientReversal(alpha=1.0),
-        #     nn.Linear(512, 1024),
-        #     nn.ReLU(),
-        #     nn.Linear(1024, 367)
-        # )
-
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -349,7 +285,6 @@ class DiT(nn.Module):
             drop_text: bool = False,
             cache: bool = True,
             text_embed=None,
-            labels=None,
     ):
         seq_len = x.shape[1]
         if cache:
@@ -364,14 +299,9 @@ class DiT(nn.Module):
         else:
             text_embed = self.text_embed(text, seq_len, drop_text=drop_text, text_embed=text_embed)
 
-        # logits = self.classifier(text_embed.mean(dim=1))
-
-        # speaker_loss = None  # 0.01 * self.criterion(logits, torch.tensor(labels).to('cuda')) if labels is not None else torch.tensor(0)
-        #
-        # text_embed, encoding_indices, loss = self.vq(text_embed)
         x = self.input_embed(x, cond, text_embed, drop_audio_cond=drop_audio_cond)
 
-        return x, None, None
+        return x
 
     def clear_cache(self):
         self.text_cond, self.text_uncond = None, None
@@ -388,7 +318,6 @@ class DiT(nn.Module):
             cfg_infer: bool = False,  # cfg inference, pack cond & uncond forward
             cache: bool = False,
             text_embed=None,
-            labels=None,
             lang='ro',
     ):
         batch, seq_len = x.shape[0], x.shape[1]
@@ -398,25 +327,23 @@ class DiT(nn.Module):
         # t: conditioning time, text: text, x: noised audio + cond audio + text
         t = self.time_embed(time)
         if lang == 'ro':
-            text_embed, vq_loss, _ = self.language_module(text, x.shape[1])
+            text_embed = self.language_module(text, x.shape[1])
 
         if cfg_infer:  # pack cond & uncond forward: b n d -> 2b n d
-            x_cond, _, _ = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False,
+            x_cond = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False,
                                                 text_embed=text_embed,
                                                 cache=cache)
-            x_uncond, _, _ = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True,
+            x_uncond = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True,
                                                   text_embed=text_embed,
                                                   cache=cache)
             x = torch.cat((x_cond, x_uncond), dim=0)
             t = torch.cat((t, t), dim=0)
             mask = torch.cat((mask, mask), dim=0) if mask is not None else None
-            # vq_loss = loss1 + loss2 if loss1 is not None else None
-            # speaker_loss = sloss1 + sloss2 if sloss1 is not None else None
         else:
-            x, _, _ = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond,
+            x = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond,
                                            drop_text=drop_text,
                                            cache=cache,
-                                           text_embed=text_embed, labels=labels)
+                                           text_embed=text_embed)
 
         rope = self.rotary_embed.forward_from_seq_len(seq_len)
 
@@ -436,4 +363,4 @@ class DiT(nn.Module):
         x = self.norm_out(x, t)
         output = self.proj_out(x)
 
-        return output, vq_loss, _
+        return output

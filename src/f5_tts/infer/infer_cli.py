@@ -5,12 +5,9 @@ import re
 from datetime import datetime
 from importlib.resources import files
 from pathlib import Path
-from f5_tts.model.backbones.dit import LanguageModule
-import torch
 import numpy as np
 import soundfile as sf
 import tomli
-from cached_path import cached_path
 from hydra.utils import get_class
 from omegaconf import OmegaConf
 from unidecode import unidecode
@@ -263,37 +260,20 @@ model_cfg = OmegaConf.load(
 model_cls = get_class(f"f5_tts.model.{model_cfg.model.backbone}")
 model_arc = model_cfg.model.arch
 
-repo_name, ckpt_step, ckpt_type = "F5-TTS", 1250000, "safetensors"
+# Ro-F5TTS defaults (arXiv:2512.12297): local finetuned checkpoint + Romanian vocab
+if not ckpt_file:
+    ckpt_file = str(files("f5_tts").joinpath("../../../ckpts/ro_tts_lang_mod/model_last.pt"))
+if not vocab_file:
+    vocab_file = str(files("f5_tts").joinpath("../../../data/ro_tts_pinyin/vocab.txt"))
 
 if model != "F5TTS_Base":
     assert vocoder_name == model_cfg.model.mel_spec.mel_spec_type
 
-# override for previous models
-if model == "F5TTS_Base":
-    if vocoder_name == "vocos":
-        ckpt_step = 1200000
-    elif vocoder_name == "bigvgan":
-        model = "F5TTS_Base_bigvgan"
-        ckpt_type = "pt"
-elif model == "E2TTS_Base":
-    repo_name = "E2-TTS"
-    ckpt_step = 1200000
-
-if not ckpt_file:
-    ckpt_file = str(cached_path(f"hf://SWivid/{repo_name}/{model}/model_{ckpt_step}.{ckpt_type}"))
-
 print(f"Using {model}...")
 ema_model = load_model(
-    model_cls, model_arc, r"C:\Users\Mihaitza\Desktop\F5-TTS\ckpts\ro_tts\pretrained_model_1250000.safetensors",
+    model_cls, model_arc, ckpt_file,
     mel_spec_type=vocoder_name, vocab_file=vocab_file, device=device
 )
-
-language_module = LanguageModule(text_dim=512, text_num_embeds=len(ema_model.vocab_char_map), conv_layers=4,
-                                 vocab_char_map=ema_model.vocab_char_map).to('cuda')
-
-language_module.build_vq(ema_model.transformer.text_embed.text_embed)
-checkpoint = torch.load(ckpt_file)
-language_module.load_state_dict(checkpoint['language_module_state_dict'])
 
 
 # inference process
@@ -351,7 +331,6 @@ def main():
             speed=local_speed,
             fix_duration=fix_duration,
             device=device,
-            language_module=language_module
         )
         generated_audio_segments.append(audio_segment)
 

@@ -46,7 +46,7 @@ model_pre = CFM(
     vocab_char_map=vocab_char_map,
 )
 
-checkpoint_pre = load_file(r'C:\Users\Mihaitza\Desktop\F5-TTS\checkpoints\model_1250000.safetensors')
+checkpoint_pre = load_file('ckpts/ro_tts_lang_mod/pretrained_model_1250000.safetensors')
 checkpoint_pre = {"ema_model_state_dict": checkpoint_pre}
 
 checkpoint_pre["model_state_dict"] = {
@@ -54,7 +54,7 @@ checkpoint_pre["model_state_dict"] = {
     for k, v in checkpoint_pre["ema_model_state_dict"].items()
     if k not in ["initted", "update", "step"]
 }
-model_pre.load_state_dict(checkpoint_pre['model_state_dict'])
+model_pre.load_state_dict(checkpoint_pre['model_state_dict'], strict=False)
 
 
 vocab_char_map, vocab_size = get_tokenizer('ro_tts', 'pinyin')
@@ -63,8 +63,8 @@ model_ft = CFM(
     mel_spec_kwargs=mel_spec_kwargs,
     vocab_char_map=vocab_char_map,
 )
-checkpoint_ft = torch.load(r'C:\Users\Mihaitza\Desktop\F5-TTS\ckpts\ro_tts_common\model_40000.pt')
-model_ft.load_state_dict(checkpoint_ft['model_state_dict'])
+checkpoint_ft = torch.load('ckpts/ro_tts_lang_mod/model_last.pt')
+model_ft.load_state_dict(checkpoint_ft['model_state_dict'], strict=False)
 
 
 dataset = load_dataset('ro_tts')

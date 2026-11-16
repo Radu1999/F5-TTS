@@ -18,11 +18,6 @@ from tqdm import tqdm
 from f5_tts.model import CFM
 from f5_tts.model.dataset import DynamicBatchSampler, collate_fn
 from f5_tts.model.utils import default, exists
-from f5_tts.model.backbones.dit import LanguageModule
-
-import matplotlib.pyplot as plt
-
-import numpy as np
 
 
 # trainer
@@ -252,8 +247,14 @@ class Trainer:
             checkpoint = torch.load(f"{self.checkpoint_path}/{latest_checkpoint}", weights_only=True,
                                     map_location="cpu")
 
-            self.accelerator.unwrap_model(self.model).load_state_dict(
-                checkpoint["model_state_dict"])
+            # strict=False: older checkpoints may carry keys that no longer exist
+            # (e.g. experimental VQ / classifier params); report them, don't crash
+            load_result = self.accelerator.unwrap_model(self.model).load_state_dict(
+                checkpoint["model_state_dict"], strict=False)
+            if load_result.missing_keys:
+                print("Resume: missing keys ->", load_result.missing_keys)
+            if load_result.unexpected_keys:
+                print("Resume: ignoring unexpected keys ->", load_result.unexpected_keys)
             self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
             if self.scheduler:
                 self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
@@ -337,7 +338,7 @@ class Trainer:
             train_dataloader, self.scheduler
         )  # actual multi_gpu updates = single_gpu updates / gpu nums
         start_update = self.load_checkpoint()
-        new_embedding = torch.nn.Embedding(self.model.transformer.text_embed.text_embed.num_embeddings, self.model.transformer.text_embed.text_embed.embedding_dim).to('cuda')
+        new_embedding = torch.nn.Embedding(self.model.transformer.text_embed.text_embed.num_embeddings, self.model.transformer.text_embed.text_embed.embedding_dim).to(self.accelerator.device)
         new_embedding.weight.data.copy_(self.model.transformer.text_embed.text_embed.weight.data)
         self.model.transformer.language_module.set_emb(new_embedding)
         for p in self.model.transformer.language_module.parameters():
@@ -357,7 +358,6 @@ class Trainer:
         for epoch in range(skipped_epoch, self.epochs):
             print('STARTED EPCH')
             self.model.train()
-            all_encoding_indices = []
             if exists(resumable_with_seed) and epoch == skipped_epoch:
                 progress_bar_initial = math.ceil(skipped_batch / self.grad_accumulation_steps)
                 current_dataloader = skipped_dataloader
@@ -382,30 +382,19 @@ class Trainer:
                     text_inputs = batch["text"]
                     mel_spec = batch["mel"].permute(0, 2, 1)
                     mel_lengths = batch["mel_lengths"]
-                    labels = batch["label"]
 
                     # TODO. add duration predictor training
                     if self.duration_predictor is not None and self.accelerator.is_local_main_process:
                         dur_loss = self.duration_predictor(mel_spec, lens=batch.get("durations"))
                         self.accelerator.log({"duration loss": dur_loss.item()}, step=global_update)
 
-                    loss, loss_vq, speaker_loss, cond, pred = self.model(
-                        mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler, labels=labels
+                    loss, cond, pred = self.model(
+                        mel_spec, text=text_inputs, lens=mel_lengths, noise_scheduler=self.noise_scheduler
                     )
 
                     self.accelerator.log({"flow_loss": loss.item()}, step=global_update)
 
-                    if speaker_loss is not None:
-                        self.accelerator.log({"speaker_loss": speaker_loss.item()}, step=global_update)
-                        loss += speaker_loss
-
-
-                    if loss_vq is not None:
-                        loss_vq = loss_vq.mean()
-                        self.accelerator.log({"vq_loss": loss_vq.item()}, step=global_update)
-                        self.accelerator.backward(loss + loss_vq)
-                    else:
-                        self.accelerator.backward(loss)
+                    self.accelerator.backward(loss)
 
                     if self.log_gradients and self.accelerator.is_local_main_process and self.accelerator.sync_gradients:
                         total_grad_norm = 0.0
@@ -510,25 +499,6 @@ class Trainer:
                         )
                         self.model.train()
             self.accelerator.wait_for_everyone()
-            if len(all_encoding_indices) > 0:
-                indices_this_process = torch.cat([idx.flatten() for idx in all_encoding_indices])
-                gathered_indices = self.accelerator.gather(indices_this_process)
-                if self.accelerator.is_local_main_process:
-                    indices_np = gathered_indices.cpu().numpy()
-                    if np.isnan(indices_np).any():
-                        print("WARNING: NaN values detected in encoding indices at update", global_update)
-                        nan_count = np.isnan(indices_np).sum()
-                        print(f"Number of NaN values: {nan_count}")
-                        # Optionally, you can log this as well
-                        self.accelerator.log({"nan_encoding_indices_count": nan_count}, step=global_update)
-                        # Remove NaNs for plotting
-                        indices_np = indices_np[~np.isnan(indices_np)]
-                    fig, ax = plt.subplots()
-                    ax.hist(indices_np, bins='auto')
-                    ax.set_xlabel("Encoding index")
-                    ax.set_ylabel("Frequency")
-                    self.accelerator.log({"encoding_indices_distribution": wandb.Image(fig)}, step=global_update)
-                    plt.close(fig)
             if sanity_check:
                 break
 

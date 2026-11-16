@@ -9,7 +9,6 @@ from f5_tts.model import CFM, DiT, UNetT
 from f5_tts.model.language_trainer import Trainer
 from f5_tts.model.dataset import load_dataset
 from f5_tts.model.utils import get_tokenizer
-from f5_tts.model.backbones.dit import LanguageModule
 
 # -------------------------- Dataset Settings --------------------------- #
 target_sample_rate = 24000
@@ -97,7 +96,8 @@ def main():
     # Model parameters based on experiment name
 
     import wandb
-    wandb.login(key=args.wandb_key)
+    if args.wandb_key:
+        wandb.login(key=args.wandb_key)
 
     if args.exp_name == "F5TTS_v1_Base":
         wandb_resume_id = None
