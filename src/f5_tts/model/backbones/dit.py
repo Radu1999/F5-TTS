@@ -21,8 +21,7 @@ from f5_tts.model.modules import (
     DiTBlock,
     TimestepEmbedding,
     get_pos_embed_indices,
-    precompute_freqs_cis,
-    VQEmbedding
+    precompute_freqs_cis
 )
 
 from f5_tts.model.utils import (
