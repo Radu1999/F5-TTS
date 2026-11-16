@@ -68,7 +68,7 @@ def load_f5tts():
     if ckpt_path.startswith("hf://"):
         ckpt_path = str(cached_path(ckpt_path))
     F5TTS_model_cfg = json.loads(DEFAULT_TTS_MODEL_CFG[2])
-    return load_model(DiT, F5TTS_model_cfg, ckpt_path, vocab_file=DEFAULT_TTS_MODEL_CFG[1])
+    return load_model(DiT, F5TTS_model_cfg, ckpt_path, vocab_file=DEFAULT_TTS_MODEL_CFG[1], use_ema=False)
 
 
 def load_e2tts():

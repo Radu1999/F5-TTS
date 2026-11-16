@@ -37,12 +37,12 @@ _ref_text_cache = {}
 
 device = (
     "cuda"
-    if torch.cuda.is_available()
-    else "xpu"
-    if torch.xpu.is_available()
-    else "mps"
-    if torch.backends.mps.is_available()
-    else "cpu"
+    # if torch.cuda.is_available()
+    # else "xpu"
+    # if torch.xpu.is_available()
+    # else "mps"
+    # if torch.backends.mps.is_available()
+    # else "cpu"
 )
 
 tempfile_kwargs = {"delete_on_close": False} if sys.version_info >= (3, 12) else {"delete": False}
@@ -188,7 +188,7 @@ def transcribe(ref_audio, language=None):
 def load_checkpoint(model, ckpt_path, device: str, dtype=None, use_ema=False):
     if dtype is None:
         dtype = (
-            torch.float16
+            torch.float32
             if "cuda" in device
             and torch.cuda.get_device_properties(device).major >= 7
             and not torch.cuda.get_device_name().endswith("[ZLUDA]")
@@ -218,11 +218,11 @@ def load_checkpoint(model, ckpt_path, device: str, dtype=None, use_ema=False):
             if key in checkpoint["model_state_dict"]:
                 del checkpoint["model_state_dict"][key]
 
-        model.load_state_dict(checkpoint["model_state_dict"])
+        model.load_state_dict(checkpoint["model_state_dict"], strict=True)
     else:
         if ckpt_type == "safetensors":
             checkpoint = {"model_state_dict": checkpoint}
-        model.load_state_dict(checkpoint["model_state_dict"])
+        model.load_state_dict(checkpoint["model_state_dict"], strict=True)
 
     del checkpoint
     torch.cuda.empty_cache()
@@ -408,7 +408,6 @@ def infer_process(
         print(f"gen_text {i}", gen_text)
     print("\n")
 
-    show_info(f"Generating audio in {len(gen_text_batches)} batches...")
     return next(
         infer_batch_process(
             (audio, sr),

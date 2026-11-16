@@ -165,7 +165,7 @@ class CFM(nn.Module):
 
             # predict flow (cond)
             if cfg_strength < 1e-5:
-                pred = self.transformer(
+                pred, _, _ = self.transformer(
                     x=x,
                     cond=step_cond,
                     text=text,
@@ -178,7 +178,7 @@ class CFM(nn.Module):
                 return pred
 
             # predict flow (cond and uncond), for classifier-free guidance
-            pred_cfg = self.transformer(
+            pred_cfg, _, _ = self.transformer(
                 x=x,
                 cond=step_cond,
                 text=text,
@@ -289,9 +289,8 @@ class CFM(nn.Module):
             drop_text = True
         else:
             drop_text = False
-
         # apply mask will use more memory; might adjust batchsize or batchsampler long sequence threshold
-        pred = self.transformer(
+        pred, _, _ = self.transformer(
             x=φ, cond=cond, text=text, time=time, drop_audio_cond=drop_audio_cond, drop_text=drop_text, mask=mask
         )
 

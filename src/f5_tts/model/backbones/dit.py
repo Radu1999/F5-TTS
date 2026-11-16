@@ -22,19 +22,17 @@ from f5_tts.model.modules import (
     TimestepEmbedding,
     get_pos_embed_indices,
     precompute_freqs_cis,
+    VQEmbedding
+)
+
+from f5_tts.model.utils import (
+    list_str_to_idx,
+    list_str_to_tensor,
+    exists
 )
 
 
 class LanguageModule(nn.Module):
-    """Input-level adapter that extends F5-TTS to Romanian (arXiv:2512.12297).
-
-    A new character embedding matrix (initialized as a copy of the frozen F5-TTS
-    embedding, see Trainer) plus a stack of ConvNeXt-V2 blocks that model the
-    co-dependencies between the new character embeddings — a "soft"
-    letter-to-sound layer. Its output replaces the text embedding fed to the
-    frozen F5-TTS backbone. Everything outside this module is kept frozen.
-    """
-
     def __init__(self, text_num_embeds=256, text_dim=None, conv_mult=2, conv_layers=4,
                  mask_padding=True, embeddings=None):
         super().__init__()
@@ -81,7 +79,7 @@ class LanguageModule(nn.Module):
             text = block(text)
             text = text.masked_fill(text_mask.unsqueeze(-1).expand(-1, -1, text.size(-1)), 0.0)
 
-        return text
+        return text, None, None
 
     def set_emb(self, embeddings):
         self.text_embed = embeddings
@@ -216,10 +214,9 @@ class DiT(nn.Module):
         super().__init__()
 
         self.time_embed = TimestepEmbedding(dim)
+        self.language_module = LanguageModule(text_num_embeds=text_num_embeds, text_dim=text_dim)
         if text_dim is None:
             text_dim = mel_dim
-        # Romanian input adapter (arXiv:2512.12297); the rest of the model stays frozen
-        self.language_module = LanguageModule(text_num_embeds=text_num_embeds, text_dim=text_dim)
         self.text_embed = TextEmbedding(
             text_num_embeds, text_dim, mask_padding=text_mask_padding, conv_layers=conv_layers
         )
@@ -251,9 +248,7 @@ class DiT(nn.Module):
 
         self.norm_out = AdaLayerNorm_Final(dim)  # final modulation
         self.proj_out = nn.Linear(dim, mel_dim)
-
         self.checkpoint_activations = checkpoint_activations
-
         self.initialize_weights()
 
     def initialize_weights(self):
@@ -285,6 +280,7 @@ class DiT(nn.Module):
             drop_text: bool = False,
             cache: bool = True,
             text_embed=None,
+            labels=None,
     ):
         seq_len = x.shape[1]
         if cache:
@@ -301,7 +297,7 @@ class DiT(nn.Module):
 
         x = self.input_embed(x, cond, text_embed, drop_audio_cond=drop_audio_cond)
 
-        return x
+        return x, None, None
 
     def clear_cache(self):
         self.text_cond, self.text_uncond = None, None
@@ -318,6 +314,7 @@ class DiT(nn.Module):
             cfg_infer: bool = False,  # cfg inference, pack cond & uncond forward
             cache: bool = False,
             text_embed=None,
+            labels=None,
             lang='ro',
     ):
         batch, seq_len = x.shape[0], x.shape[1]
@@ -330,20 +327,20 @@ class DiT(nn.Module):
             text_embed = self.language_module(text, x.shape[1])
 
         if cfg_infer:  # pack cond & uncond forward: b n d -> 2b n d
-            x_cond = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False,
+            x_cond, _, _ = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False,
                                                 text_embed=text_embed,
                                                 cache=cache)
-            x_uncond = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True,
+            x_uncond, _, _ = self.get_input_embed(x, cond, text, drop_audio_cond=True, drop_text=True,
                                                   text_embed=text_embed,
                                                   cache=cache)
             x = torch.cat((x_cond, x_uncond), dim=0)
             t = torch.cat((t, t), dim=0)
             mask = torch.cat((mask, mask), dim=0) if mask is not None else None
         else:
-            x = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond,
+            x, _, _ = self.get_input_embed(x, cond, text, drop_audio_cond=drop_audio_cond,
                                            drop_text=drop_text,
                                            cache=cache,
-                                           text_embed=text_embed)
+                                           text_embed=text_embed, labels=labels)
 
         rope = self.rotary_embed.forward_from_seq_len(seq_len)
 
@@ -363,4 +360,4 @@ class DiT(nn.Module):
         x = self.norm_out(x, t)
         output = self.proj_out(x)
 
-        return output
+        return output, None, None
