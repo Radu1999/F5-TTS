@@ -323,7 +323,7 @@ class DiT(nn.Module):
         # t: conditioning time, text: text, x: noised audio + cond audio + text
         t = self.time_embed(time)
         if lang == 'ro':
-            text_embed = self.language_module(text, x.shape[1])
+            text_embed, _, _ = self.language_module(text, x.shape[1])
 
         if cfg_infer:  # pack cond & uncond forward: b n d -> 2b n d
             x_cond, _, _ = self.get_input_embed(x, cond, text, drop_audio_cond=False, drop_text=False,
