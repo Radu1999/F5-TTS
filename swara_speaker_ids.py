@@ -5,8 +5,8 @@ from pathlib import Path
 from tqdm import tqdm
 
 # Paths
-arrow_path = r"C:\Users\Mihaitza\Desktop\F5-TTS\data\ro_tts_pinyin\raw.arrow"
-output_arrow_path = r"C:\Users\Mihaitza\Desktop\F5-TTS\data\ro_tts_pinyin\raw_with_client_id.arrow"
+arrow_path = "data/ro_tts_pinyin/raw.arrow"
+output_arrow_path = "data/ro_tts_pinyin/raw_with_client_id.arrow"
 
 # Load Arrow dataset and convert to pandas
 ds = Dataset.from_file(arrow_path)

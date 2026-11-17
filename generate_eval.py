@@ -67,7 +67,7 @@ def save_grouped_data(grouped_data, output_dir="grouped_output"):
 
 if __name__ == "__main__":
     # Path to the metadata.csv file
-    csv_path = r"C:\Users\Mihaitza\Desktop\F5-TTS\data\ro_tts_pinyin\metadata.csv"
+    csv_path = "data/ro_tts_pinyin/metadata.csv"
     
     try:
         # Group entries by identity

@@ -7,11 +7,9 @@ import os
 
 df = pd.read_csv('./data/ro_tts_pinyin/metadata.csv', header=None, delimiter='|')
 
-# Remove the prefix from the first column
-prefix_to_remove = '/media/DATA/CORPORA/SWARA2.0/SWARA2.0_22k/'
-df[0] = df[0].str.replace(prefix_to_remove, '', regex=False)
-# prefix_to_remove = 'wavs//media/DATA/CORPORA/SWARA2.0/SWARA1.0_22k/'
-# df[0] = df[0].str.replace(prefix_to_remove, '', regex=False)
+# Strip the corpus prefix so paths become "wavs/<file>.wav".
+# Mount-point independent: keep everything from the last "wavs/" segment on.
+df[0] = df[0].apply(lambda p: p[p.rindex("wavs/"):] if "wavs/" in p else p)
 
 # # Add "wavs/" prefix to each filename
 #df[0] = 'wavs/' + df[0]

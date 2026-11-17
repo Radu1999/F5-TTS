@@ -25,7 +25,7 @@ if __name__ == "__main__":
     ds_metadata = []
     speakers = set()
     filtered_count = 0
-    with open(r"./validated.tsv", 'r', encoding='utf-8') as file:
+    with open("data/ro_tts_common_pinyin/validated.tsv", 'r', encoding='utf-8') as file:
         reader = csv.DictReader(file, delimiter='\t')
 
         # Print header to see available columns
@@ -48,7 +48,7 @@ if __name__ == "__main__":
 
     
     # Write to metadata.csv
-    with open(r'C:\Users\Mihaitza\Desktop\F5-TTS\data\ro_tts_common_pinyin\metadata.csv', 'w', newline='', encoding='utf-8') as csvfile:
+    with open("data/ro_tts_common_pinyin/metadata.csv", 'w', newline='', encoding='utf-8') as csvfile:
         writer = csv.writer(csvfile, delimiter="|")
         
         # Write data

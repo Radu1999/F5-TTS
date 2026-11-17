@@ -37,8 +37,8 @@ def load_romanian_model():
     }
 
     # Paths
-    ckpt_path = r"C:\Users\Mihaitza\Desktop\F5-TTS\checkpoints\swara_te_doro_lang_novq_40500.pt"
-    vocab_file = r"data\ro_tts_pinyin\vocab.txt"
+    ckpt_path = "ckpts/ro_tts_lang_mod/model_last.pt"
+    vocab_file = "data/ro_tts_pinyin/vocab.txt"
 
     # Load model
     model = load_model(

@@ -75,10 +75,9 @@ Checkpoints are written to `ckpts/ro_tts_lang_mod/` (`model_last.pt` + rotated
 > copied into the checkpoint dir as `pretrained_*`). Without it, `language_trainer.py`
 > prints "No pretrained model found" and the backbone starts from scratch.
 
-### SLURM (UPB cluster)
-
-`sbatch submit_job.sh` runs `run_training.sh` inside the `tts.sif` Singularity image on
-`dgxa100`, with `data/` and `ckpts/` bind-mounted.
+On the UPB cluster, run `run_training.sh` on a GPU node (wrap it in your own
+SLURM/Singularity setup if you have one) — this repo ships no cluster-specific
+wrappers.
 
 ## Inference
 

@@ -121,8 +121,8 @@ def load_romanian_model():
         'conv_layers': 4
     }
 
-    ckpt_path = r"C:\Users\Mihaitza\Desktop\F5-TTS\checkpoints\full_model.pt"
-    vocab_file = r"data\ro_tts_pinyin\vocab.txt"
+    ckpt_path = "ckpts/ro_tts_lang_mod/model_last.pt"
+    vocab_file = "data/ro_tts_pinyin/vocab.txt"
 
     model = load_model(
         model_cls=DiT,

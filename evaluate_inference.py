@@ -34,8 +34,8 @@ def load_romanian_model():
         'conv_layers': 4
     }
 
-    ckpt_path = r"C:\Users\Mihaitza\Desktop\F5-TTS\ckpts\ro_tts\pretrained_model_1250000.safetensors"
-    vocab_file = r"data\ro_tts_pinyin\vocab.txt"
+    ckpt_path = "ckpts/ro_tts_lang_mod/pretrained_model_1250000.safetensors"
+    vocab_file = "data/ro_tts_pinyin/vocab.txt"
 
     model = load_model(
         model_cls=DiT,

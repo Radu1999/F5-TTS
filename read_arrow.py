@@ -4,9 +4,9 @@ import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 
-arrow_path = r"C:\Users\Mihaitza\Desktop\F5-TTS\data\ro_tts_common_pinyin\raw.arrow"
+arrow_path = "data/ro_tts_common_pinyin/raw.arrow"
 
-tsv_path = "./validated.tsv"
+tsv_path = "data/ro_tts_common_pinyin/validated.tsv"
 # Load Arrow dataset
 ds = Dataset.from_file(arrow_path)
 
@@ -21,7 +21,7 @@ df["audio_path"] = prefix + df["path"]
 # Keep only columns needed for join
 df = df[["audio_path", "client_id"]]
 
-num_distinct_clients = df["`client_id`"].nunique()
+num_distinct_clients = df["client_id"].nunique()
 print("Number of distinct client IDs:", num_distinct_clients)
 print(df.head(10)[["audio_path", "client_id"]])
 
@@ -34,7 +34,7 @@ merged = ds_df.merge(df, on="audio_path", how="left")
 
 # Back to Arrow dataset
 ds_merged = Dataset.from_pandas(merged)
-output_arrow_path = r"C:\Users\Mihaitza\Desktop\F5-TTS\data\ro_tts_common_pinyin\raw_with_client_id.arrow"
+output_arrow_path = "data/ro_tts_common_pinyin/raw_with_client_id.arrow"
 print(ds_merged)
 print(ds_merged[0])
 
